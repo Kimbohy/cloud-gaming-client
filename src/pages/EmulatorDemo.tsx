@@ -4,8 +4,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { io, Socket } from "socket.io-client";
 
+// Correct ROM path (no /rom/ subdirectory)
 const ROM_PATH =
-  "/home/kim/code/cloud-gaming/rom/Kirby & the Amazing Mirror/Kirby & The Amazing Mirror (USA).gba";
+  "/home/henintsoa/MISA/mr_Haga/gaming/Kirby & the Amazing Mirror/Kirby & The Amazing Mirror (USA).gba";
 
 export default function EmulatorDemo() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -14,8 +15,21 @@ export default function EmulatorDemo() {
   const [connected, setConnected] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioBufferQueueRef = useRef<AudioBufferSourceNode[]>([]);
+  const nextPlayTimeRef = useRef<number>(0);
 
   useEffect(() => {
+    // Initialize Web Audio API
+    const AudioContextClass =
+      window.AudioContext || (window as any).webkitAudioContext;
+    audioContextRef.current = new AudioContextClass();
+
+    console.log("Audio Context initialized:", {
+      sampleRate: audioContextRef.current.sampleRate,
+      state: audioContextRef.current.state,
+    });
+
     // Connect to WebSocket
     const socket = io("http://localhost:3000");
     socketRef.current = socket;
@@ -23,6 +37,11 @@ export default function EmulatorDemo() {
     socket.on("connect", () => {
       console.log("WebSocket connected");
       setConnected(true);
+
+      // Resume audio context on user interaction
+      if (audioContextRef.current?.state === "suspended") {
+        audioContextRef.current.resume();
+      }
     });
 
     socket.on("disconnect", () => {
@@ -31,18 +50,31 @@ export default function EmulatorDemo() {
     });
 
     socket.on("frame", (data) => {
-      console.log("Received frame:", data);
       // Draw frame to canvas
       renderFrame(data);
     });
 
     socket.on("audio", (data) => {
-      console.log("Received audio:", data);
       // Play audio
+      playAudio(data);
     });
 
     return () => {
       socket.disconnect();
+
+      // Clean up audio
+      audioBufferQueueRef.current.forEach((node) => {
+        try {
+          node.stop();
+        } catch (e) {
+          // Ignore if already stopped
+        }
+      });
+      audioBufferQueueRef.current = [];
+
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
     };
   }, []);
 
@@ -112,28 +144,107 @@ export default function EmulatorDemo() {
     });
   };
 
+  const playAudio = (audioData: any) => {
+    if (!audioContextRef.current) {
+      console.warn("Audio context not initialized");
+      return;
+    }
+
+    const audioContext = audioContextRef.current;
+
+    // Resume audio context if suspended (browser autoplay policy)
+    if (audioContext.state === "suspended") {
+      audioContext.resume().then(() => {
+        console.log("Audio context resumed");
+      });
+    }
+
+    try {
+      // Decode base64 audio data
+      const binaryString = atob(audioData.data);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      // Convert PCM int16 to float32 for Web Audio API
+      const int16Array = new Int16Array(bytes.buffer);
+      const float32Array = new Float32Array(int16Array.length);
+
+      for (let i = 0; i < int16Array.length; i++) {
+        // Convert int16 (-32768 to 32767) to float32 (-1.0 to 1.0)
+        float32Array[i] = int16Array[i] / 32768.0;
+      }
+
+      const sampleRate = audioData.sampleRate || 32040;
+      const channels = audioData.channels || 2;
+      const samplesPerChannel = float32Array.length / channels;
+
+      // Create audio buffer
+      const audioBuffer = audioContext.createBuffer(
+        channels,
+        samplesPerChannel,
+        sampleRate
+      );
+
+      // Fill buffer with audio data (interleaved to planar)
+      for (let channel = 0; channel < channels; channel++) {
+        const channelData = audioBuffer.getChannelData(channel);
+        for (let i = 0; i < samplesPerChannel; i++) {
+          channelData[i] = float32Array[i * channels + channel];
+        }
+      }
+
+      // Create buffer source and play
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
+
+      // Schedule playback
+      const currentTime = audioContext.currentTime;
+      const startTime = Math.max(currentTime, nextPlayTimeRef.current);
+
+      source.start(startTime);
+
+      // Update next play time
+      const duration = audioBuffer.duration;
+      nextPlayTimeRef.current = startTime + duration;
+
+      // Clean up after playback
+      source.onended = () => {
+        const index = audioBufferQueueRef.current.indexOf(source);
+        if (index > -1) {
+          audioBufferQueueRef.current.splice(index, 1);
+        }
+      };
+
+      audioBufferQueueRef.current.push(source);
+
+      // Log occasionally for debugging
+      if (Math.random() < 0.01) {
+        console.log("Playing audio:", {
+          samples: samplesPerChannel,
+          duration: duration.toFixed(3),
+          channels,
+          sampleRate,
+          queueLength: audioBufferQueueRef.current.length,
+        });
+      }
+    } catch (error) {
+      console.error("Error playing audio:", error);
+    }
+  };
+
   const renderFrame = (frameData: any) => {
     if (!canvasRef.current) return;
 
     const ctx = canvasRef.current.getContext("2d");
     if (!ctx) return;
 
-    console.log("Frame data:", {
-      hasFormat: !!frameData.format,
-      format: frameData.format,
-      hasData: !!frameData.data,
-      dataLength: frameData.data?.length,
-      width: frameData.width,
-      height: frameData.height,
-    });
-
     if (frameData.format === "png" && frameData.data) {
       // Decode PNG frame
       const img = new Image();
       img.onload = () => {
-        console.log(
-          `[renderFrame] Canvas: ${canvasRef.current?.width}x${canvasRef.current?.height}, Image: ${img.width}x${img.height}`
-        );
         // Clear and draw image at native resolution
         ctx.clearRect(0, 0, 240, 160);
         ctx.drawImage(img, 0, 0, 240, 160);
@@ -292,6 +403,18 @@ export default function EmulatorDemo() {
               variant="destructive"
             >
               Stop Emulation
+            </Button>
+            <Button
+              onClick={() => {
+                if (audioContextRef.current?.state === "suspended") {
+                  audioContextRef.current.resume().then(() => {
+                    console.log("Audio enabled");
+                  });
+                }
+              }}
+              variant="outline"
+            >
+              🔊 Enable Audio
             </Button>
           </div>
 
