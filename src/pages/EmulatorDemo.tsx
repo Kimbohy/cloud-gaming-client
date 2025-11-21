@@ -131,16 +131,12 @@ export default function EmulatorDemo() {
       // Decode PNG frame
       const img = new Image();
       img.onload = () => {
-        // Clear canvas first to avoid duplicate rendering
-        ctx.clearRect(
-          0,
-          0,
-          canvasRef.current!.width,
-          canvasRef.current!.height
+        console.log(
+          `[renderFrame] Canvas: ${canvasRef.current?.width}x${canvasRef.current?.height}, Image: ${img.width}x${img.height}`
         );
-        // Draw image without stretching (use native resolution)
-        ctx.drawImage(img, 0, 0);
-        console.log("Frame rendered successfully");
+        // Clear and draw image at native resolution
+        ctx.clearRect(0, 0, 240, 160);
+        ctx.drawImage(img, 0, 0, 240, 160);
       };
       img.onerror = (e) => {
         console.error("Failed to load frame image:", e);
@@ -396,7 +392,7 @@ export default function EmulatorDemo() {
             </div>
           )}
 
-          <div className="border rounded-lg p-4 bg-black flex items-center justify-center">
+          <div className="border rounded-lg p-4 bg-black inline-flex items-center justify-center">
             <canvas
               ref={canvasRef}
               width={240}
@@ -405,7 +401,6 @@ export default function EmulatorDemo() {
                 imageRendering: "pixelated",
                 width: "480px",
                 height: "320px",
-                objectFit: "contain",
               }}
             />
           </div>
