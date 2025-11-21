@@ -5,8 +5,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { io, Socket } from "socket.io-client";
 
 // Correct ROM path (no /rom/ subdirectory)
-const ROM_PATH =
-  "/home/henintsoa/MISA/mr_Haga/gaming/Kirby & the Amazing Mirror/Kirby & The Amazing Mirror (USA).gba";
+const ROM_PATH = import.meta.env.VITE_ROM_PATH;
 
 export default function EmulatorDemo() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -31,7 +30,7 @@ export default function EmulatorDemo() {
     });
 
     // Connect to WebSocket
-    const socket = io("http://localhost:3000");
+    const socket = io("http://192.168.57.10:3000");
     socketRef.current = socket;
 
     socket.on("connect", () => {
@@ -269,7 +268,7 @@ export default function EmulatorDemo() {
       setStatus("Creating session...");
 
       const response = await fetch(
-        "http://localhost:3000/api/emulator/sessions",
+        "http://192.168.57.10:3000/api/emulator/sessions",
         {
           method: "POST",
           headers: {
@@ -319,7 +318,7 @@ export default function EmulatorDemo() {
       setStatus("Starting emulation...");
 
       const response = await fetch(
-        `http://localhost:3000/api/emulator/sessions/${sid}/start`,
+        `http://192.168.57.10:3000/api/emulator/sessions/${sid}/start`,
         {
           method: "POST",
         }
@@ -345,7 +344,7 @@ export default function EmulatorDemo() {
       setStatus("Stopping emulation...");
 
       const response = await fetch(
-        `http://localhost:3000/api/emulator/sessions/${sessionId}`,
+        `http://192.168.57.10:3000/api/emulator/sessions/${sessionId}`,
         {
           method: "DELETE",
         }
