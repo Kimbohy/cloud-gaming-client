@@ -30,7 +30,9 @@ export default function EmulatorDemo() {
     });
 
     // Connect to WebSocket
-    const socket = io("http://192.168.57.10:3000");
+    const socketUrl =
+      import.meta.env.VITE_SOCKET_URL || "http://localhost:3000";
+    const socket = io(socketUrl);
     socketRef.current = socket;
 
     socket.on("connect", () => {
@@ -267,18 +269,17 @@ export default function EmulatorDemo() {
       setError(null);
       setStatus("Creating session...");
 
-      const response = await fetch(
-        "http://192.168.57.10:3000/api/emulator/sessions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            romPath: ROM_PATH,
-          }),
-        }
-      );
+      const apiBaseUrl =
+        import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/api";
+      const response = await fetch(`${apiBaseUrl}/emulator/sessions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          romPath: ROM_PATH,
+        }),
+      });
 
       if (!response.ok) {
         throw new Error(`Failed to create session: ${response.statusText}`);
@@ -317,8 +318,10 @@ export default function EmulatorDemo() {
     try {
       setStatus("Starting emulation...");
 
+      const apiBaseUrl =
+        import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/api";
       const response = await fetch(
-        `http://192.168.57.10:3000/api/emulator/sessions/${sid}/start`,
+        `${apiBaseUrl}/emulator/sessions/${sid}/start`,
         {
           method: "POST",
         }
@@ -343,8 +346,10 @@ export default function EmulatorDemo() {
     try {
       setStatus("Stopping emulation...");
 
+      const apiBaseUrl =
+        import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/api";
       const response = await fetch(
-        `http://192.168.57.10:3000/api/emulator/sessions/${sessionId}`,
+        `${apiBaseUrl}/emulator/sessions/${sessionId}`,
         {
           method: "DELETE",
         }
