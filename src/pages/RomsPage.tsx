@@ -1,81 +1,87 @@
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useNavigate } from "react-router-dom";
+
+type GameType = {
+  id: string;
+  name: string;
+  console: string;
+  filePath: string;
+  imagePath: string;
+  description: string;
+  uploadAt: string;
+};
 
 export default function RomsPage() {
-  const games = [
+  const navigate = useNavigate();
+
+  const games: GameType[] = [
     {
-      name: "Advance GTA",
-      image: "/game.webp",
-      genre: "Action",
-      players: "1P",
+      id: "1",
+      name: "Advance GTA (Japan) (En) (Rev 1)",
+      console: "GBA",
+      filePath: "Advance GTA (Japan) (En) (Rev 1).gba",
+      imagePath: "/game.webp",
+      description: "Action",
+      uploadAt: "1P",
     },
     {
+      id: "2",
+      name: "Advance Wars 2 - Black Hole Rising",
+      console: "GBA",
+      filePath: "Advance Wars 2 - Black Hole Rising (USA).gba",
+      imagePath: "/game.webp",
+      description: "Strategy",
+      uploadAt: "1-4P",
+    },
+    {
+      id: "3",
       name: "Kirby & The Amazing Mirror",
-      image: "/game.webp",
-      genre: "Platform",
-      players: "1-4P",
+      console: "GBA",
+      filePath: "Kirby & The Amazing Mirror (USA).gba",
+      imagePath: "/game.webp",
+      description: "Platform",
+      uploadAt: "1-4P",
     },
     {
-      name: "Pokemon Mystery Dungeon",
-      image: "/game.webp",
-      genre: "RPG",
-      players: "1P",
+      id: "4",
+      name: "Pokemon Mystery Dungeon - Red Rescue Team",
+      console: "GBA",
+      filePath:
+        "Pokemon Mystery Dungeon - Red Rescue Team (USA, Australia).gba",
+      imagePath: "/game.webp",
+      description: "RPG",
+      uploadAt: "1P",
     },
     {
+      id: "5",
+      name: "Pokemon Mystery Dungeon Red Rescue Team EX",
+      console: "GBA",
+      filePath: "Pokemon Mystery Dungeon Red Rescue Team EX.gba",
+      imagePath: "/game.webp",
+      description: "RPG",
+      uploadAt: "1P",
+    },
+    {
+      id: "6",
       name: "The Sims 2",
-      image: "/game.webp",
-      genre: "Simulation",
-      players: "1P",
-    },
-    {
-      name: "Advance Wars 2",
-      image: "/game.webp",
-      genre: "Strategy",
-      players: "1-4P",
-    },
-    {
-      name: "Pokemon Mystery Dungeon",
-      image: "/game.webp",
-      genre: "RPG",
-      players: "1P",
-    },
-    {
-      name: "The Sims 2",
-      image: "/game.webp",
-      genre: "Simulation",
-      players: "1P",
-    },
-    {
-      name: "Advance Wars 2",
-      image: "/game.webp",
-      genre: "Strategy",
-      players: "1-4P",
-    },
-    {
-      name: "Pokemon Mystery Dungeon",
-      image: "/game.webp",
-      genre: "RPG",
-      players: "1P",
-    },
-    {
-      name: "The Sims 2",
-      image: "/game.webp",
-      genre: "Simulation",
-      players: "1P",
-    },
-    {
-      name: "Advance Wars 2",
-      image: "/game.webp",
-      genre: "Strategy",
-      players: "1-4P",
-    },
-    {
-      name: "Advance Wars 2",
-      image: "/game.webp",
-      genre: "Strategy",
-      players: "1-4P",
+      console: "GBA",
+      filePath: "Sims 2, The (USA, Europe) (En,Fr,De,Es,It,Nl).gba",
+      imagePath: "/game.webp",
+      description: "Simulation",
+      uploadAt: "1P",
     },
   ];
+
+  const handleGameClick = (game: GameType) => {
+    navigate(`/play/${game.id}`, {
+      state: {
+        name: game.name,
+        rom: game.filePath,
+        desc: game.description,
+      },
+    });
+  };
 
   return (
     <div className="min-h-screen bg-linear-to-br from-slate-950 via-purple-950 to-slate-950">
@@ -119,6 +125,7 @@ export default function RomsPage() {
           {games.map((game, index) => (
             <Card
               key={index}
+              onClick={() => handleGameClick(game)}
               className="group relative cursor-pointer transition-all duration-500 hover:shadow-[0_0_50px_rgba(168,85,247,0.5)] overflow-hidden bg-slate-900/50 border-slate-700/50 backdrop-blur-sm hover:scale-105 hover:-translate-y-2"
             >
               {/* Glowing Border Effect */}
@@ -126,9 +133,9 @@ export default function RomsPage() {
 
               <CardContent className="p-0">
                 {/* Image Container with Gaming Effects */}
-                <div className="relative aspect-square overflow-hidden bg-linear-to-br from-slate-800 to-slate-900">
+                <div className="relative overflow-hidden bg-linear-to-br from-slate-800 to-slate-900">
                   <img
-                    src={game.image}
+                    src={game.imagePath}
                     alt={game.name}
                     className="w-full h-full object-cover transition-all duration-500 group-hover:scale-110 group-hover:brightness-75"
                   />
@@ -139,14 +146,14 @@ export default function RomsPage() {
                   {/* Genre Badge */}
                   <div className="absolute top-2 right-2">
                     <Badge className="bg-black/70 text-cyan-400 border-cyan-500/50 text-[10px] font-bold backdrop-blur-sm px-1.5 py-0.5">
-                      {game.genre}
+                      {game.description}
                     </Badge>
                   </div>
 
                   {/* Players Badge */}
                   <div className="absolute top-2 left-2">
                     <Badge className="bg-black/70 text-purple-400 border-purple-500/50 text-[10px] font-bold backdrop-blur-sm px-1.5 py-0.5">
-                      {game.players}
+                      {game.uploadAt}
                     </Badge>
                   </div>
 
