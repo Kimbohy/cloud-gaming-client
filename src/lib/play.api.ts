@@ -30,12 +30,20 @@ export type InputButton =
 
 export type InputState = "down" | "up";
 
-// Configuration
-const getApiBaseUrl = () =>
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/api";
+// Configuration - Use current hostname to support IP access
+const getServerHost = () => {
+  // If env variable is set, use it (should NOT include /api)
+  if (import.meta.env.VITE_SERVER_URL) {
+    return import.meta.env.VITE_SERVER_URL;
+  }
+  // Otherwise, use the current browser hostname with server port
+  const hostname = window.location.hostname;
+  return `http://${hostname}:3000`;
+};
 
-const getSocketUrl = () =>
-  import.meta.env.VITE_SOCKET_URL || "http://localhost:3000";
+const getApiBaseUrl = () => `${getServerHost()}/api`;
+
+const getSocketUrl = () => getServerHost();
 
 // Key mapping
 const KEY_MAP: Record<string, InputButton> = {
