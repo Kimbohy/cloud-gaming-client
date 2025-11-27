@@ -133,6 +133,13 @@ export default function PlayPage() {
     };
   }, []);
 
+  // Re-initialize canvas when fullscreen state changes (canvas element changes)
+  useEffect(() => {
+    if (canvasRef.current) {
+      canvasManagerRef.current.initialize(canvasRef.current);
+    }
+  }, [isFullscreen]);
+
   useEffect(() => {
     inputManagerRef.current.setSessionId(sessionId);
     if (sessionId) {
