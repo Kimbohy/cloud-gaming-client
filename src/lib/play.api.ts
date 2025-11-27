@@ -1,0 +1,424 @@
+import { io, Socket } from "socket.io-client";
+
+// Types
+export interface GameSession {
+  sessionId: string;
+}
+
+export interface AudioData {
+  data: string;
+  sampleRate?: number;
+  channels?: number;
+}
+
+export interface FrameData {
+  format: string;
+  data?: string;
+}
+
+export type InputButton =
+  | "UP"
+  | "DOWN"
+  | "LEFT"
+  | "RIGHT"
+  | "A"
+  | "B"
+  | "L"
+  | "R"
+  | "START"
+  | "SELECT";
+
+export type InputState = "down" | "up";
+
+// Configuration - Use current hostname to support IP access
+const getServerHost = () => {
+  // If env variable is set, use it (should NOT include /api)
+  if (import.meta.env.VITE_SERVER_URL) {
+    return import.meta.env.VITE_SERVER_URL;
+  }
+  // Otherwise, use the current browser hostname with server port
+  const hostname = window.location.hostname;
+  return `http://${hostname}:3000`;
+};
+
+const getApiBaseUrl = () => `${getServerHost()}/api`;
+
+const getSocketUrl = () => getServerHost();
+
+// Key mapping
+const KEY_MAP: Record<string, InputButton> = {
+  ArrowUp: "UP",
+  ArrowDown: "DOWN",
+  ArrowLeft: "LEFT",
+  ArrowRight: "RIGHT",
+  z: "A",
+  x: "B",
+  a: "L",
+  s: "R",
+  Enter: "START",
+  Shift: "SELECT",
+};
+
+export function keyToButton(key: string): InputButton | null {
+  return KEY_MAP[key] || null;
+}
+
+// Session API
+export async function createGameSession(romPath: string): Promise<GameSession> {
+  const response = await fetch(`${getApiBaseUrl()}/emulator/sessions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ romPath }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create session: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function startGameSession(sessionId: string): Promise<void> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/emulator/sessions/${sessionId}/start`,
+    {
+      method: "POST",
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to start session: ${response.statusText}`);
+  }
+}
+
+export async function stopGameSession(sessionId: string): Promise<void> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/emulator/sessions/${sessionId}`,
+    {
+      method: "DELETE",
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to stop session: ${response.statusText}`);
+  }
+}
+
+// WebSocket Management
+export class GameSocketManager {
+  private socket: Socket | null = null;
+  private onConnectCallback?: () => void;
+  private onDisconnectCallback?: () => void;
+  private onFrameCallback?: (data: FrameData) => void;
+  private onAudioCallback?: (data: AudioData) => void;
+
+  connect(): Socket {
+    if (this.socket) {
+      return this.socket;
+    }
+
+    this.socket = io(getSocketUrl());
+
+    this.socket.on("connect", () => {
+      console.log("WebSocket connected");
+      this.onConnectCallback?.();
+    });
+
+    this.socket.on("disconnect", () => {
+      console.log("WebSocket disconnected");
+      this.onDisconnectCallback?.();
+    });
+
+    this.socket.on("frame", (data: FrameData) => {
+      this.onFrameCallback?.(data);
+    });
+
+    this.socket.on("audio", (data: AudioData) => {
+      this.onAudioCallback?.(data);
+    });
+
+    return this.socket;
+  }
+
+  disconnect(): void {
+    if (this.socket) {
+      this.socket.disconnect();
+      this.socket = null;
+    }
+  }
+
+  subscribeToSession(sessionId: string): void {
+    if (!this.socket) {
+      throw new Error("Socket not connected");
+    }
+    this.socket.emit("subscribe", { sessionId });
+  }
+
+  sendInput(sessionId: string, button: InputButton, state: InputState): void {
+    if (!this.socket) {
+      console.warn("Cannot send input - socket not connected");
+      return;
+    }
+
+    console.log("Sending input:", { button, state, sessionId });
+    this.socket.emit("input", { sessionId, button, state });
+  }
+
+  onConnect(callback: () => void): void {
+    this.onConnectCallback = callback;
+  }
+
+  onDisconnect(callback: () => void): void {
+    this.onDisconnectCallback = callback;
+  }
+
+  onFrame(callback: (data: FrameData) => void): void {
+    this.onFrameCallback = callback;
+  }
+
+  onAudio(callback: (data: AudioData) => void): void {
+    this.onAudioCallback = callback;
+  }
+
+  isConnected(): boolean {
+    return this.socket?.connected ?? false;
+  }
+}
+
+// Audio Management
+export class GameAudioManager {
+  private audioContext: AudioContext | null = null;
+  private audioBufferQueue: AudioBufferSourceNode[] = [];
+  private nextPlayTime: number = 0;
+
+  initialize(): void {
+    const AudioContextClass =
+      window.AudioContext || (window as any).webkitAudioContext;
+    this.audioContext = new AudioContextClass();
+
+    console.log("Audio Context initialized:", {
+      sampleRate: this.audioContext.sampleRate,
+      state: this.audioContext.state,
+    });
+  }
+
+  async resume(): Promise<void> {
+    if (this.audioContext?.state === "suspended") {
+      await this.audioContext.resume();
+      console.log("Audio context resumed");
+    }
+  }
+
+  playAudio(audioData: AudioData): void {
+    if (!this.audioContext) {
+      console.warn("Audio context not initialized");
+      return;
+    }
+
+    const audioContext = this.audioContext;
+
+    // Resume audio context if suspended (browser autoplay policy)
+    if (audioContext.state === "suspended") {
+      audioContext.resume().then(() => {
+        console.log("Audio context resumed");
+      });
+    }
+
+    try {
+      // Decode base64 audio data
+      const binaryString = atob(audioData.data);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      // Convert PCM int16 to float32 for Web Audio API
+      const int16Array = new Int16Array(bytes.buffer);
+      const float32Array = new Float32Array(int16Array.length);
+
+      for (let i = 0; i < int16Array.length; i++) {
+        // Convert int16 (-32768 to 32767) to float32 (-1.0 to 1.0)
+        float32Array[i] = int16Array[i] / 32768.0;
+      }
+
+      const sampleRate = audioData.sampleRate || 32040;
+      const channels = audioData.channels || 2;
+      const samplesPerChannel = float32Array.length / channels;
+
+      // Create audio buffer
+      const audioBuffer = audioContext.createBuffer(
+        channels,
+        samplesPerChannel,
+        sampleRate
+      );
+
+      // Fill buffer with audio data (interleaved to planar)
+      for (let channel = 0; channel < channels; channel++) {
+        const channelData = audioBuffer.getChannelData(channel);
+        for (let i = 0; i < samplesPerChannel; i++) {
+          channelData[i] = float32Array[i * channels + channel];
+        }
+      }
+
+      // Create buffer source and play
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
+
+      // Schedule playback
+      const currentTime = audioContext.currentTime;
+      const startTime = Math.max(currentTime, this.nextPlayTime);
+
+      source.start(startTime);
+
+      // Update next play time
+      const duration = audioBuffer.duration;
+      this.nextPlayTime = startTime + duration;
+
+      // Clean up after playback
+      source.onended = () => {
+        const index = this.audioBufferQueue.indexOf(source);
+        if (index > -1) {
+          this.audioBufferQueue.splice(index, 1);
+        }
+      };
+
+      this.audioBufferQueue.push(source);
+
+      // Log occasionally for debugging
+      if (Math.random() < 0.01) {
+        console.log("Playing audio:", {
+          samples: samplesPerChannel,
+          duration: duration.toFixed(3),
+          channels,
+          sampleRate,
+          queueLength: this.audioBufferQueue.length,
+        });
+      }
+    } catch (error) {
+      console.error("Error playing audio:", error);
+    }
+  }
+
+  cleanup(): void {
+    // Stop all audio sources
+    this.audioBufferQueue.forEach((node) => {
+      try {
+        node.stop();
+      } catch (e) {
+        // Ignore if already stopped
+      }
+    });
+    this.audioBufferQueue = [];
+
+    // Close audio context
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = null;
+    }
+  }
+}
+
+// Video/Canvas Management
+export class GameCanvasManager {
+  private canvas: HTMLCanvasElement | null = null;
+  private context: CanvasRenderingContext2D | null = null;
+
+  initialize(canvas: HTMLCanvasElement): void {
+    this.canvas = canvas;
+    this.context = canvas.getContext("2d");
+  }
+
+  renderFrame(frameData: FrameData): void {
+    if (!this.canvas || !this.context) {
+      console.warn("Canvas not initialized");
+      return;
+    }
+
+    if (frameData.format === "png" && frameData.data) {
+      // Decode PNG frame
+      const img = new Image();
+      img.onload = () => {
+        if (this.context) {
+          // Clear and draw image at native resolution
+          this.context.clearRect(0, 0, 240, 160);
+          this.context.drawImage(img, 0, 0, 240, 160);
+        }
+      };
+      img.onerror = (e) => {
+        console.error("Failed to load frame image:", e);
+      };
+      img.src = `data:image/png;base64,${frameData.data}`;
+    } else {
+      // Fallback: render mock data with random colors
+      console.warn("Using fallback rendering - no PNG data");
+      this.context.fillStyle = `rgb(${Math.random() * 255}, ${
+        Math.random() * 255
+      }, ${Math.random() * 255})`;
+      this.context.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    }
+  }
+}
+
+// Input Management
+export class GameInputManager {
+  private sessionId: string | null = null;
+  private socketManager: GameSocketManager;
+  private keyDownHandler: ((e: KeyboardEvent) => void) | null = null;
+  private keyUpHandler: ((e: KeyboardEvent) => void) | null = null;
+
+  constructor(socketManager: GameSocketManager) {
+    this.socketManager = socketManager;
+  }
+
+  setSessionId(sessionId: string | null): void {
+    this.sessionId = sessionId;
+  }
+
+  setupKeyboardControls(): void {
+    this.keyDownHandler = (e: KeyboardEvent) => {
+      if (!this.sessionId) return;
+
+      const button = keyToButton(e.key);
+      if (button) {
+        e.preventDefault();
+        this.socketManager.sendInput(this.sessionId, button, "down");
+      }
+    };
+
+    this.keyUpHandler = (e: KeyboardEvent) => {
+      if (!this.sessionId) return;
+
+      const button = keyToButton(e.key);
+      if (button) {
+        e.preventDefault();
+        this.socketManager.sendInput(this.sessionId, button, "up");
+      }
+    };
+
+    window.addEventListener("keydown", this.keyDownHandler);
+    window.addEventListener("keyup", this.keyUpHandler);
+  }
+
+  sendButtonPress(button: InputButton, duration: number = 100): void {
+    if (!this.sessionId) return;
+
+    this.socketManager.sendInput(this.sessionId, button, "down");
+    setTimeout(() => {
+      if (this.sessionId) {
+        this.socketManager.sendInput(this.sessionId, button, "up");
+      }
+    }, duration);
+  }
+
+  cleanup(): void {
+    if (this.keyDownHandler) {
+      window.removeEventListener("keydown", this.keyDownHandler);
+    }
+    if (this.keyUpHandler) {
+      window.removeEventListener("keyup", this.keyUpHandler);
+    }
+  }
+}
