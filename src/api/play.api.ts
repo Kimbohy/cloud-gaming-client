@@ -1,5 +1,64 @@
 import { io, Socket } from "socket.io-client";
 
+// Custom API Error class
+export class PlayApiError extends Error {
+  status?: number;
+  isNetworkError: boolean;
+
+  constructor(
+    message: string,
+    status?: number,
+    isNetworkError: boolean = false
+  ) {
+    super(message);
+    this.name = "PlayApiError";
+    this.status = status;
+    this.isNetworkError = isNetworkError;
+  }
+}
+
+// Helper function to handle fetch with error handling
+async function fetchWithErrorHandling<T>(
+  url: string,
+  options?: RequestInit
+): Promise<T> {
+  try {
+    const response = await fetch(url, options);
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Unknown error");
+      throw new PlayApiError(
+        errorText || `HTTP Error ${response.status}`,
+        response.status,
+        false
+      );
+    }
+
+    const text = await response.text();
+    if (!text) return {} as T;
+    return JSON.parse(text);
+  } catch (error) {
+    if (error instanceof PlayApiError) {
+      throw error;
+    }
+
+    // Network error (server not started, no connection, etc.)
+    if (error instanceof TypeError) {
+      throw new PlayApiError(
+        "Impossible de se connecter au serveur. Vérifiez que le serveur est démarré.",
+        undefined,
+        true
+      );
+    }
+
+    throw new PlayApiError(
+      "Une erreur inattendue s'est produite",
+      undefined,
+      false
+    );
+  }
+}
+
 // Types
 export interface GameSession {
   sessionId: string;
@@ -65,45 +124,34 @@ export function keyToButton(key: string): InputButton | null {
 
 // Session API
 export async function createGameSession(romPath: string): Promise<GameSession> {
-  const response = await fetch(`${getApiBaseUrl()}/emulator/sessions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ romPath }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to create session: ${response.statusText}`);
-  }
-
-  return response.json();
+  return fetchWithErrorHandling<GameSession>(
+    `${getApiBaseUrl()}/emulator/sessions`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ romPath }),
+    }
+  );
 }
 
 export async function startGameSession(sessionId: string): Promise<void> {
-  const response = await fetch(
+  return fetchWithErrorHandling<void>(
     `${getApiBaseUrl()}/emulator/sessions/${sessionId}/start`,
     {
       method: "POST",
     }
   );
-
-  if (!response.ok) {
-    throw new Error(`Failed to start session: ${response.statusText}`);
-  }
 }
 
 export async function stopGameSession(sessionId: string): Promise<void> {
-  const response = await fetch(
+  return fetchWithErrorHandling<void>(
     `${getApiBaseUrl()}/emulator/sessions/${sessionId}`,
     {
       method: "DELETE",
     }
   );
-
-  if (!response.ok) {
-    throw new Error(`Failed to stop session: ${response.statusText}`);
-  }
 }
 
 // WebSocket Management - Multi-channel for better performance

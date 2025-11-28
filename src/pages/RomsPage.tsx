@@ -11,35 +11,49 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { useNavigate } from "react-router-dom";
-import { useEffect, useState, useRef } from "react";
-import { getAllRoms, uploadRom, type Rom } from "@/api/roms.api";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { getAllRoms, uploadRom, ApiError, type Rom } from "@/api/roms.api";
+
+// Error state interface
+interface ErrorState {
+  message: string;
+  isNetworkError: boolean;
+}
 
 export default function RomsPage() {
   const navigate = useNavigate();
   const [games, setGames] = useState<Rom[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorState | null>(null);
   const [uploading, setUploading] = useState(false);
   const [selectedRomFile, setSelectedRomFile] = useState<File | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const romInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    const fetchRoms = async () => {
-      try {
-        setLoading(true);
-        const roms = await getAllRoms();
-        setGames(roms);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load games");
-      } finally {
-        setLoading(false);
+  const fetchRoms = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const roms = await getAllRoms();
+      setGames(roms);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError({ message: err.message, isNetworkError: err.isNetworkError });
+      } else {
+        setError({
+          message: err instanceof Error ? err.message : "Failed to load games",
+          isNetworkError: false,
+        });
       }
-    };
-
-    fetchRoms();
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchRoms();
+  }, [fetchRoms]);
 
   const handleGameClick = (game: Rom) => {
     navigate(`/play/${game.id}`, {
@@ -57,7 +71,10 @@ export default function RomsPage() {
 
   const handleUploadImageClick = () => {
     if (!selectedRomFile) {
-      setError("Please select a ROM file first");
+      setError({
+        message: "Please select a ROM file first",
+        isNetworkError: false,
+      });
       return;
     }
     imageInputRef.current?.click();
@@ -83,7 +100,18 @@ export default function RomsPage() {
       setGames((prev) => [...prev, newRom]);
       setDialogOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to upload ROM");
+      if (err instanceof ApiError) {
+        setError({ message: err.message, isNetworkError: err.isNetworkError });
+        // Close dialog on network error to show the error state
+        if (err.isNetworkError) {
+          setDialogOpen(false);
+        }
+      } else {
+        setError({
+          message: err instanceof Error ? err.message : "Failed to upload ROM",
+          isNetworkError: false,
+        });
+      }
     } finally {
       setUploading(false);
       setSelectedRomFile(null);
@@ -98,7 +126,10 @@ export default function RomsPage() {
 
   const handleUploadWithoutImage = async () => {
     if (!selectedRomFile) {
-      setError("Please select a ROM file first");
+      setError({
+        message: "Please select a ROM file first",
+        isNetworkError: false,
+      });
       return;
     }
 
@@ -109,7 +140,18 @@ export default function RomsPage() {
       setGames((prev) => [...prev, newRom]);
       setDialogOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to upload ROM");
+      if (err instanceof ApiError) {
+        setError({ message: err.message, isNetworkError: err.isNetworkError });
+        // Close dialog on network error to show the error state
+        if (err.isNetworkError) {
+          setDialogOpen(false);
+        }
+      } else {
+        setError({
+          message: err instanceof Error ? err.message : "Failed to upload ROM",
+          isNetworkError: false,
+        });
+      }
     } finally {
       setUploading(false);
       setSelectedRomFile(null);
@@ -315,9 +357,35 @@ export default function RomsPage() {
         {/* Error State */}
         {error && !loading && (
           <div className="text-center py-20">
-            <div className="text-6xl mb-4">❌</div>
-            <p className="text-red-400 text-xl font-bold mb-2">ERROR</p>
-            <p className="text-slate-500 font-mono text-sm">{error}</p>
+            <div className="text-6xl mb-4">
+              {error.isNetworkError ? "🔌" : "❌"}
+            </div>
+            <p className="text-red-400 text-xl font-bold mb-2">
+              {error.isNetworkError ? "CONNEXION ERROR" : "ERROR"}
+            </p>
+            <p className="text-slate-400 font-mono text-sm max-w-md mx-auto mb-6">
+              {error.message}
+            </p>
+
+            {/* Help message for network errors */}
+            {error.isNetworkError && (
+              <div className="bg-slate-800/50 rounded-xl p-4 max-w-md mx-auto mb-6 border border-slate-700/50">
+                <p className="text-slate-300 text-sm mb-2">
+                  Pour démarrer le serveur, exécutez :
+                </p>
+                <code className="bg-slate-900 text-green-400 px-3 py-2 rounded block text-sm font-mono">
+                  cd server && pnpm start:dev
+                </code>
+              </div>
+            )}
+
+            {/* Retry button */}
+            <Button
+              onClick={fetchRoms}
+              className="bg-linear-to-r from-cyan-500 to-purple-500 hover:from-cyan-400 hover:to-purple-400 text-white font-bold py-3 px-6 rounded-full shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 transition-all duration-300"
+            >
+              <span className="flex items-center gap-2">🔄 Réessayer</span>
+            </Button>
           </div>
         )}
 
