@@ -13,6 +13,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { getAllRoms, uploadRom, ApiError, type Rom } from "@/api/roms.api";
+import { authClient } from "@/lib/auth-client";
 
 // Error state interface
 interface ErrorState {
@@ -30,6 +31,13 @@ export default function RomsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const romInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+
+  const user = authClient.getUser();
+
+  const handleLogout = async () => {
+    await authClient.signOut();
+    navigate("/auth");
+  };
 
   const fetchRoms = useCallback(async () => {
     try {
@@ -177,6 +185,22 @@ export default function RomsPage() {
       </div>
 
       <div className="relative container mx-auto px-4 py-12 max-w-7xl">
+        {/* Top Bar with User Info and Logout */}
+        <div className="absolute top-4 right-4 flex items-center gap-4">
+          {user && (
+            <span className="text-slate-300 text-sm font-medium">
+              👤 {user.name}
+            </span>
+          )}
+          <Button
+            onClick={handleLogout}
+            variant="outline"
+            className="border-red-500/50 text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-all"
+          >
+            🚪 Logout
+          </Button>
+        </div>
+
         {/* Gaming Header */}
         <div className="mb-12 text-center">
           <div className="inline-block mb-4">
