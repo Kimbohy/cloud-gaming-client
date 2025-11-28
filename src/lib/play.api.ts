@@ -106,64 +106,142 @@ export async function stopGameSession(sessionId: string): Promise<void> {
   }
 }
 
-// WebSocket Management
+// WebSocket Management - Multi-channel for better performance
 export class GameSocketManager {
-  private socket: Socket | null = null;
+  private controlSocket: Socket | null = null;
+  private videoSocket: Socket | null = null;
+  private audioSocket: Socket | null = null;
+  private inputSocket: Socket | null = null;
+
   private onConnectCallback?: () => void;
   private onDisconnectCallback?: () => void;
   private onFrameCallback?: (data: FrameData) => void;
   private onAudioCallback?: (data: AudioData) => void;
 
-  connect(): Socket {
-    if (this.socket) {
-      return this.socket;
-    }
+  private connectionCount = 0;
+  private readonly expectedConnections = 4;
 
-    this.socket = io(getSocketUrl());
+  connect(): void {
+    const serverUrl = getSocketUrl();
 
-    this.socket.on("connect", () => {
-      console.log("WebSocket connected");
-      this.onConnectCallback?.();
+    // Control socket (main namespace)
+    this.controlSocket = io(serverUrl, {
+      transports: ["websocket"], // Force WebSocket only
     });
 
-    this.socket.on("disconnect", () => {
-      console.log("WebSocket disconnected");
+    // Video stream socket (separate namespace)
+    this.videoSocket = io(`${serverUrl}/video`, {
+      transports: ["websocket"],
+    });
+
+    // Audio stream socket (separate namespace)
+    this.audioSocket = io(`${serverUrl}/audio`, {
+      transports: ["websocket"],
+    });
+
+    // Input socket (separate namespace)
+    this.inputSocket = io(`${serverUrl}/input`, {
+      transports: ["websocket"],
+    });
+
+    // Setup control socket handlers
+    this.controlSocket.on("connect", () => {
+      console.log("✅ [Control] Connected");
+      this.checkAllConnected();
+    });
+
+    this.controlSocket.on("disconnect", () => {
+      console.log("❌ [Control] Disconnected");
       this.onDisconnectCallback?.();
     });
 
-    this.socket.on("frame", (data: FrameData) => {
+    // Setup video socket handlers
+    this.videoSocket.on("connect", () => {
+      console.log("✅ [Video] Connected");
+      this.checkAllConnected();
+    });
+
+    this.videoSocket.on("frame", (data: FrameData) => {
       this.onFrameCallback?.(data);
     });
 
-    this.socket.on("audio", (data: AudioData) => {
+    this.videoSocket.on("disconnect", () => {
+      console.log("❌ [Video] Disconnected");
+    });
+
+    // Setup audio socket handlers
+    this.audioSocket.on("connect", () => {
+      console.log("✅ [Audio] Connected");
+      this.checkAllConnected();
+    });
+
+    this.audioSocket.on("audio", (data: AudioData) => {
       this.onAudioCallback?.(data);
     });
 
-    return this.socket;
+    this.audioSocket.on("disconnect", () => {
+      console.log("❌ [Audio] Disconnected");
+    });
+
+    // Setup input socket handlers
+    this.inputSocket.on("connect", () => {
+      console.log("✅ [Input] Connected");
+      this.checkAllConnected();
+    });
+
+    this.inputSocket.on("disconnect", () => {
+      console.log("❌ [Input] Disconnected");
+    });
+  }
+
+  private checkAllConnected(): void {
+    const allConnected =
+      this.controlSocket?.connected &&
+      this.videoSocket?.connected &&
+      this.audioSocket?.connected &&
+      this.inputSocket?.connected;
+
+    if (allConnected && this.connectionCount === 0) {
+      console.log("🎮 All channels connected - Ready to play!");
+      this.connectionCount = this.expectedConnections;
+      this.onConnectCallback?.();
+    }
   }
 
   disconnect(): void {
-    if (this.socket) {
-      this.socket.disconnect();
-      this.socket = null;
-    }
+    this.controlSocket?.disconnect();
+    this.videoSocket?.disconnect();
+    this.audioSocket?.disconnect();
+    this.inputSocket?.disconnect();
+
+    this.controlSocket = null;
+    this.videoSocket = null;
+    this.audioSocket = null;
+    this.inputSocket = null;
+    this.connectionCount = 0;
   }
 
   subscribeToSession(sessionId: string): void {
-    if (!this.socket) {
-      throw new Error("Socket not connected");
+    if (!this.isConnected()) {
+      throw new Error("Sockets not connected");
     }
-    this.socket.emit("subscribe", { sessionId });
+
+    // Subscribe on all channels
+    console.log("📡 Subscribing to session:", sessionId);
+    this.controlSocket?.emit("subscribe", { sessionId });
+    this.videoSocket?.emit("subscribe", { sessionId });
+    this.audioSocket?.emit("subscribe", { sessionId });
+    this.inputSocket?.emit("subscribe", { sessionId });
   }
 
   sendInput(sessionId: string, button: InputButton, state: InputState): void {
-    if (!this.socket) {
-      console.warn("Cannot send input - socket not connected");
+    if (!this.inputSocket?.connected) {
+      console.warn("Cannot send input - input socket not connected");
       return;
     }
 
-    console.log("Sending input:", { button, state, sessionId });
-    this.socket.emit("input", { sessionId, button, state });
+    // Send through dedicated input channel for minimal latency
+    this.inputSocket.emit("input", { sessionId, button, state });
   }
 
   onConnect(callback: () => void): void {
@@ -183,7 +261,12 @@ export class GameSocketManager {
   }
 
   isConnected(): boolean {
-    return this.socket?.connected ?? false;
+    return (
+      (this.controlSocket?.connected ?? false) &&
+      (this.videoSocket?.connected ?? false) &&
+      (this.audioSocket?.connected ?? false) &&
+      (this.inputSocket?.connected ?? false)
+    );
   }
 }
 
