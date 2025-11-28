@@ -11,7 +11,7 @@ import {
   GameCanvasManager,
   GameInputManager,
   type InputButton,
-} from "@/lib/play.api";
+} from "@/api/play.api";
 import { useQueryState } from "nuqs";
 
 export default function PlayPage() {
