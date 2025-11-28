@@ -10,9 +10,16 @@ import {
   GameAudioManager,
   GameCanvasManager,
   GameInputManager,
+  PlayApiError,
   type InputButton,
 } from "@/api/play.api";
 import { useQueryState } from "nuqs";
+
+// Error state interface
+interface ErrorState {
+  message: string;
+  isNetworkError: boolean;
+}
 
 export default function PlayPage() {
   const { id } = useParams();
@@ -31,7 +38,7 @@ export default function PlayPage() {
 
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("Ready");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorState | null>(null);
   const [connected, setConnected] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -158,7 +165,15 @@ export default function PlayPage() {
       socketManagerRef.current.subscribeToSession(data.sessionId);
       return data.sessionId;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create session");
+      if (err instanceof PlayApiError) {
+        setError({ message: err.message, isNetworkError: err.isNetworkError });
+      } else {
+        setError({
+          message:
+            err instanceof Error ? err.message : "Failed to create session",
+          isNetworkError: false,
+        });
+      }
       setStatus("Error");
       return null;
     }
@@ -180,9 +195,15 @@ export default function PlayPage() {
       await startGameSession(sid);
       setStatus("Playing");
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to start emulation"
-      );
+      if (err instanceof PlayApiError) {
+        setError({ message: err.message, isNetworkError: err.isNetworkError });
+      } else {
+        setError({
+          message:
+            err instanceof Error ? err.message : "Failed to start emulation",
+          isNetworkError: false,
+        });
+      }
       setStatus("Error");
     }
   };
@@ -195,7 +216,15 @@ export default function PlayPage() {
       setSessionId(null);
       setStatus("Ready");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to stop emulation");
+      if (err instanceof PlayApiError) {
+        setError({ message: err.message, isNetworkError: err.isNetworkError });
+      } else {
+        setError({
+          message:
+            err instanceof Error ? err.message : "Failed to stop emulation",
+          isNetworkError: false,
+        });
+      }
     }
   };
 
@@ -530,7 +559,25 @@ export default function PlayPage() {
         {/* Error */}
         {error && (
           <div className="mb-4 md:mb-6 p-3 md:p-4 bg-red-950/50 border border-red-500/50 rounded-xl backdrop-blur-sm">
-            <p className="text-red-300 text-xs md:text-sm font-mono">{error}</p>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xl">
+                {error.isNetworkError ? "🔌" : "❌"}
+              </span>
+              <span className="text-red-400 font-bold text-sm">
+                {error.isNetworkError ? "Erreur de connexion" : "Erreur"}
+              </span>
+            </div>
+            <p className="text-red-300 text-xs md:text-sm font-mono">
+              {error.message}
+            </p>
+            {error.isNetworkError && (
+              <p className="text-slate-400 text-xs mt-2">
+                Vérifiez que le serveur est démarré avec:{" "}
+                <code className="bg-slate-800 px-1 rounded">
+                  cd server && pnpm start:dev
+                </code>
+              </p>
+            )}
           </div>
         )}
 
