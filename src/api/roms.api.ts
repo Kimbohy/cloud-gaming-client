@@ -1,5 +1,5 @@
 const API_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://192.168.57.10:3000";
+  import.meta.env.VITE_API_BASE_URL || "http://192.168.57.120:3000";
 
 // Custom API Error class
 export class ApiError extends Error {

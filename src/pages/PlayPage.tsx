@@ -209,6 +209,11 @@ export default function PlayPage() {
       webrtcAudioPlayerRef.current.resume();
     });
 
+    // Handle audio data from DataChannel (fallback/primary method)
+    webrtcManager.onAudioData((audioData) => {
+      webrtcAudioPlayerRef.current.playPCMAudio(audioData);
+    });
+
     webrtcManager.onConnected(() => {
       setWebrtcConnected(true);
       console.log("🎮 WebRTC peer connection connected!");

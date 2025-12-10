@@ -23,12 +23,18 @@ export class WebRTCManager {
   private socket: Socket | null = null;
   private peerConnection: RTCPeerConnection | null = null;
   private dataChannel: RTCDataChannel | null = null;
+  private audioDataChannel: RTCDataChannel | null = null; // Dedicated channel for audio
   private webrtcSessionId: string | null = null;
   private _gameSessionId: string | null = null;
 
   // Callbacks
   private onVideoTrackCallback?: (stream: MediaStream) => void;
   private onAudioTrackCallback?: (stream: MediaStream) => void;
+  private onAudioDataCallback?: (audioData: {
+    samples: Int16Array;
+    sampleRate: number;
+    channels: number;
+  }) => void;
   private onConnectedCallback?: () => void;
   private onDisconnectedCallback?: () => void;
   private onErrorCallback?: (error: Error) => void;
@@ -211,8 +217,56 @@ export class WebRTCManager {
     // Handle data channel from server
     this.peerConnection.ondatachannel = (event) => {
       console.log(`[WebRTC] Data channel received: ${event.channel.label}`);
-      this.dataChannel = event.channel;
-      this.setupDataChannelHandlers();
+
+      if (event.channel.label === "input") {
+        this.dataChannel = event.channel;
+        this.setupDataChannelHandlers();
+      } else if (event.channel.label === "audio") {
+        this.audioDataChannel = event.channel;
+        this.setupAudioDataChannelHandlers();
+      }
+    };
+  }
+
+  private setupAudioDataChannelHandlers(): void {
+    if (!this.audioDataChannel) return;
+
+    this.audioDataChannel.binaryType = "arraybuffer";
+
+    this.audioDataChannel.onopen = () => {
+      console.log("[WebRTC] ✅ Audio data channel opened");
+    };
+
+    this.audioDataChannel.onclose = () => {
+      console.log("[WebRTC] Audio data channel closed");
+    };
+
+    this.audioDataChannel.onerror = (error) => {
+      console.error("[WebRTC] Audio data channel error:", error);
+    };
+
+    this.audioDataChannel.onmessage = (event) => {
+      try {
+        const buffer = event.data as ArrayBuffer;
+        const dataView = new DataView(buffer);
+
+        // Parse header (12 bytes)
+        const sampleRate = dataView.getUint32(0, true);
+        const channels = dataView.getUint32(4, true);
+        const samplesLength = dataView.getUint32(8, true);
+
+        // Extract audio samples
+        const audioData = new Int16Array(buffer, 12, samplesLength);
+
+        // Call callback with audio data
+        this.onAudioDataCallback?.({
+          samples: audioData,
+          sampleRate,
+          channels,
+        });
+      } catch (error) {
+        console.error("[WebRTC] Failed to parse audio data:", error);
+      }
     };
   }
 
@@ -270,6 +324,16 @@ export class WebRTCManager {
     this.onAudioTrackCallback = callback;
   }
 
+  onAudioData(
+    callback: (audioData: {
+      samples: Int16Array;
+      sampleRate: number;
+      channels: number;
+    }) => void
+  ): void {
+    this.onAudioDataCallback = callback;
+  }
+
   onConnected(callback: () => void): void {
     this.onConnectedCallback = callback;
   }
@@ -314,6 +378,11 @@ export class WebRTCManager {
     if (this.dataChannel) {
       this.dataChannel.close();
       this.dataChannel = null;
+    }
+
+    if (this.audioDataChannel) {
+      this.audioDataChannel.close();
+      this.audioDataChannel = null;
     }
 
     if (this.peerConnection) {
@@ -401,18 +470,118 @@ export class WebRTCVideoRenderer {
   }
 }
 
-// WebRTC Audio Player - plays MediaStream audio
+// WebRTC Audio Player - plays MediaStream audio or raw PCM data
 export class WebRTCAudioPlayer {
   private audioElement: HTMLAudioElement | null = null;
+  private audioContext: AudioContext | null = null;
+  private sourceNode: MediaStreamAudioSourceNode | null = null;
+  private gainNode: GainNode | null = null;
+
+  // For PCM audio playback via DataChannel
+  private nextPlayTime: number = 0;
 
   initialize(): void {
+    // Create audio element as fallback
     this.audioElement = document.createElement("audio");
     this.audioElement.autoplay = true;
+    // Start muted to allow autoplay, will unmute after user interaction
+    this.audioElement.muted = true;
     this.audioElement.volume = 1.0;
     // Append to body for some browsers that require DOM presence
     this.audioElement.style.display = "none";
     document.body.appendChild(this.audioElement);
+
+    // Initialize Web Audio API for better control
+    try {
+      const AudioContextClass =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
+      this.audioContext = new AudioContextClass();
+      this.gainNode = this.audioContext.createGain();
+      this.gainNode.connect(this.audioContext.destination);
+      this.gainNode.gain.value = 1.0;
+      this.nextPlayTime = 0;
+      console.log(
+        "[WebRTC Audio] Audio context initialized:",
+        this.audioContext.state
+      );
+    } catch (error) {
+      console.warn(
+        "[WebRTC Audio] Failed to create AudioContext, falling back to audio element:",
+        error
+      );
+    }
+
     console.log("[WebRTC Audio] Audio element initialized");
+  }
+
+  // Play PCM audio data received from DataChannel
+  playPCMAudio(audioData: {
+    samples: Int16Array;
+    sampleRate: number;
+    channels: number;
+  }): void {
+    if (!this.audioContext || !this.gainNode) {
+      console.warn(
+        "[WebRTC Audio] AudioContext not initialized for PCM playback"
+      );
+      return;
+    }
+
+    // Resume audio context if suspended
+    if (this.audioContext.state === "suspended") {
+      this.audioContext.resume().catch(console.error);
+      return; // Wait for next frame after resuming
+    }
+
+    try {
+      const { samples, sampleRate, channels } = audioData;
+      const samplesPerChannel = Math.floor(samples.length / channels);
+
+      if (samplesPerChannel === 0) return;
+
+      // Convert Int16 to Float32 for Web Audio API
+      const float32Array = new Float32Array(samples.length);
+      for (let i = 0; i < samples.length; i++) {
+        float32Array[i] = samples[i] / 32768.0;
+      }
+
+      // Create audio buffer
+      const audioBuffer = this.audioContext.createBuffer(
+        channels,
+        samplesPerChannel,
+        sampleRate
+      );
+
+      // Fill buffer with audio data (interleaved to planar)
+      for (let channel = 0; channel < channels; channel++) {
+        const channelData = audioBuffer.getChannelData(channel);
+        for (let i = 0; i < samplesPerChannel; i++) {
+          channelData[i] = float32Array[i * channels + channel];
+        }
+      }
+
+      // Create buffer source and play
+      const source = this.audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(this.gainNode);
+
+      // Schedule playback
+      const currentTime = this.audioContext.currentTime;
+      const startTime = Math.max(currentTime, this.nextPlayTime);
+
+      source.start(startTime);
+
+      // Update next play time
+      const duration = audioBuffer.duration;
+      this.nextPlayTime = startTime + duration;
+    } catch (error) {
+      // Only log occasionally to avoid spam
+      if (Math.random() < 0.01) {
+        console.warn("[WebRTC Audio] Failed to play PCM audio:", error);
+      }
+    }
   }
 
   setAudioStream(stream: MediaStream): void {
@@ -437,16 +606,64 @@ export class WebRTCAudioPlayer {
       track.enabled = true;
     });
 
-    this.audioElement.srcObject = stream;
-    this.audioElement.muted = false;
-    this.audioElement.volume = 1.0;
+    // Use Web Audio API if available for better control
+    if (this.audioContext && this.gainNode) {
+      try {
+        // Clean up previous source if any
+        if (this.sourceNode) {
+          this.sourceNode.disconnect();
+          this.sourceNode = null;
+        }
 
-    // Try to play
+        // Create new source from stream
+        this.sourceNode = this.audioContext.createMediaStreamSource(stream);
+        this.sourceNode.connect(this.gainNode);
+        console.log("[WebRTC Audio] ✅ Connected stream to Web Audio API");
+
+        // Resume audio context if suspended
+        if (this.audioContext.state === "suspended") {
+          this.audioContext
+            .resume()
+            .then(() => {
+              console.log("[WebRTC Audio] ✅ AudioContext resumed");
+            })
+            .catch((error) => {
+              console.warn(
+                "[WebRTC Audio] Failed to resume AudioContext:",
+                error
+              );
+              // Set up click handler to resume
+              this.setupClickToPlay();
+            });
+        }
+      } catch (error) {
+        console.warn(
+          "[WebRTC Audio] Web Audio API failed, falling back to audio element:",
+          error
+        );
+        this.playWithAudioElement(stream);
+      }
+    } else {
+      // Fallback to audio element
+      this.playWithAudioElement(stream);
+    }
+  }
+
+  private playWithAudioElement(stream: MediaStream): void {
+    if (!this.audioElement) return;
+
+    this.audioElement.srcObject = stream;
+
+    // Try to play (may be muted initially)
     const playPromise = this.audioElement.play();
     if (playPromise !== undefined) {
       playPromise
         .then(() => {
-          console.log("[WebRTC Audio] ✅ Audio playback started");
+          console.log(
+            "[WebRTC Audio] ✅ Audio element playback started (may be muted)"
+          );
+          // Try to unmute after successful play
+          this.audioElement!.muted = false;
         })
         .catch((error) => {
           console.warn("[WebRTC Audio] Autoplay blocked:", error);
@@ -469,40 +686,76 @@ export class WebRTCAudioPlayer {
   }
 
   async resume(): Promise<void> {
+    // Resume AudioContext if it exists
+    if (this.audioContext && this.audioContext.state === "suspended") {
+      try {
+        await this.audioContext.resume();
+        console.log("[WebRTC Audio] ✅ AudioContext resumed");
+      } catch (error) {
+        console.warn("[WebRTC Audio] Failed to resume AudioContext:", error);
+      }
+    }
+
+    // Also try to resume/unmute audio element
     if (this.audioElement) {
       try {
         this.audioElement.muted = false;
         this.audioElement.volume = 1.0;
-        if (this.audioElement.paused) {
-          console.log("[WebRTC Audio] Resuming audio playback");
+        if (this.audioElement.paused && this.audioElement.srcObject) {
+          console.log("[WebRTC Audio] Resuming audio element playback");
           await this.audioElement.play();
-          console.log("[WebRTC Audio] ✅ Audio resumed successfully");
+          console.log("[WebRTC Audio] Audio element resumed successfully");
         }
       } catch (error) {
-        console.warn("[WebRTC Audio] Failed to resume:", error);
+        console.warn("[WebRTC Audio] Failed to resume audio element:", error);
       }
     }
   }
 
   setVolume(volume: number): void {
+    const normalizedVolume = Math.max(0, Math.min(1, volume));
+    if (this.gainNode) {
+      this.gainNode.gain.value = normalizedVolume;
+    }
     if (this.audioElement) {
-      this.audioElement.volume = Math.max(0, Math.min(1, volume));
+      this.audioElement.volume = normalizedVolume;
     }
   }
 
   mute(): void {
+    if (this.gainNode) {
+      this.gainNode.gain.value = 0;
+    }
     if (this.audioElement) {
       this.audioElement.muted = true;
     }
   }
 
   unmute(): void {
+    if (this.gainNode) {
+      this.gainNode.gain.value = 1.0;
+    }
     if (this.audioElement) {
       this.audioElement.muted = false;
     }
   }
 
   cleanup(): void {
+    // Clean up Web Audio API resources
+    if (this.sourceNode) {
+      this.sourceNode.disconnect();
+      this.sourceNode = null;
+    }
+    if (this.gainNode) {
+      this.gainNode.disconnect();
+      this.gainNode = null;
+    }
+    if (this.audioContext) {
+      this.audioContext.close().catch(console.error);
+      this.audioContext = null;
+    }
+
+    // Clean up audio element
     if (this.audioElement) {
       this.audioElement.srcObject = null;
       // Remove from DOM

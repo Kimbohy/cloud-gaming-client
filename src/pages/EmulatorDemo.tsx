@@ -31,7 +31,7 @@ export default function EmulatorDemo() {
 
     // Connect to WebSocket
     const socketUrl =
-      import.meta.env.VITE_SOCKET_URL || "http://192.168.57.10:3000";
+      import.meta.env.VITE_SOCKET_URL || "http://192.168.57.120:3000";
     const socket = io(socketUrl);
     socketRef.current = socket;
 
@@ -270,7 +270,7 @@ export default function EmulatorDemo() {
       setStatus("Creating session...");
 
       const apiBaseUrl =
-        import.meta.env.VITE_API_BASE_URL || "http://192.168.57.10:3000/api";
+        import.meta.env.VITE_API_BASE_URL || "http://192.168.57.120:3000/api";
       const response = await fetch(`${apiBaseUrl}/emulator/sessions`, {
         method: "POST",
         headers: {
@@ -319,7 +319,7 @@ export default function EmulatorDemo() {
       setStatus("Starting emulation...");
 
       const apiBaseUrl =
-        import.meta.env.VITE_API_BASE_URL || "http://192.168.57.10:3000/api";
+        import.meta.env.VITE_API_BASE_URL || "http://192.168.57.120:3000/api";
       const response = await fetch(
         `${apiBaseUrl}/emulator/sessions/${sid}/start`,
         {
@@ -347,7 +347,7 @@ export default function EmulatorDemo() {
       setStatus("Stopping emulation...");
 
       const apiBaseUrl =
-        import.meta.env.VITE_API_BASE_URL || "http://192.168.57.10:3000/api";
+        import.meta.env.VITE_API_BASE_URL || "http://192.168.57.120:3000/api";
       const response = await fetch(
         `${apiBaseUrl}/emulator/sessions/${sessionId}`,
         {
