@@ -104,6 +104,9 @@ const getApiBaseUrl = () => `${getServerHost()}/api`;
 
 const getSocketUrl = () => getServerHost();
 
+// Stream mode type
+export type StreamMode = "websocket" | "webrtc" | "both";
+
 // Key mapping
 const KEY_MAP: Record<string, InputButton> = {
   ArrowUp: "UP",
@@ -123,7 +126,10 @@ export function keyToButton(key: string): InputButton | null {
 }
 
 // Session API
-export async function createGameSession(romPath: string): Promise<GameSession> {
+export async function createGameSession(
+  romPath: string,
+  streamMode: StreamMode = "websocket"
+): Promise<GameSession> {
   return fetchWithErrorHandling<GameSession>(
     `${getApiBaseUrl()}/emulator/sessions`,
     {
@@ -131,7 +137,7 @@ export async function createGameSession(romPath: string): Promise<GameSession> {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ romPath }),
+      body: JSON.stringify({ romPath, streamMode }),
     }
   );
 }

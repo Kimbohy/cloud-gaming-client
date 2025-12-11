@@ -12,7 +12,14 @@ import {
   GameInputManager,
   PlayApiError,
   type InputButton,
+  type StreamMode,
 } from "@/api/play.api";
+import {
+  WebRTCManager,
+  WebRTCVideoRenderer,
+  WebRTCAudioPlayer,
+  setStreamMode as setServerStreamMode,
+} from "@/api/webrtc.api";
 import { useQueryState } from "nuqs";
 
 // Error state interface
@@ -44,6 +51,10 @@ export default function PlayPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
 
+  // Stream mode state
+  const [streamMode, setStreamMode] = useState<StreamMode>("websocket");
+  const [webrtcConnected, setWebrtcConnected] = useState(false);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameContainerRef = useRef<HTMLDivElement>(null);
   const socketManagerRef = useRef<GameSocketManager>(new GameSocketManager());
@@ -53,13 +64,43 @@ export default function PlayPage() {
     new GameInputManager(socketManagerRef.current)
   );
 
-  // Send button input directly to socket
+  // WebRTC refs
+  const webrtcManagerRef = useRef<WebRTCManager>(new WebRTCManager());
+  const webrtcVideoRendererRef = useRef<WebRTCVideoRenderer>(
+    new WebRTCVideoRenderer()
+  );
+  const webrtcAudioPlayerRef = useRef<WebRTCAudioPlayer>(
+    new WebRTCAudioPlayer()
+  );
+
+  // Resume audio on user interaction (required by browsers)
+  const resumeAudio = useCallback(() => {
+    audioManagerRef.current.resume?.();
+    webrtcAudioPlayerRef.current.resume();
+  }, []);
+
+  // Send button input directly to socket or WebRTC
   const sendInput = useCallback(
     (button: InputButton, state: "down" | "up") => {
       if (!sessionId) return;
-      socketManagerRef.current.sendInput(sessionId, button, state);
+
+      // Resume audio on any user input
+      resumeAudio();
+
+      // Use WebRTC data channel if available for lowest latency
+      if (
+        streamMode === "webrtc" &&
+        webrtcManagerRef.current.isDataChannelReady()
+      ) {
+        console.log(`[Input] Sending via WebRTC: ${button} ${state}`);
+        webrtcManagerRef.current.sendInput(button, state);
+      } else {
+        // Fallback to WebSocket for input (always available)
+        console.log(`[Input] Sending via WebSocket: ${button} ${state}`);
+        socketManagerRef.current.sendInput(sessionId, button, state);
+      }
     },
-    [sessionId]
+    [sessionId, streamMode, resumeAudio]
   );
 
   // Detect mobile device
@@ -115,7 +156,9 @@ export default function PlayPage() {
     }
   }, [gameData]);
 
+  // Initialize managers based on stream mode
   useEffect(() => {
+    // Always initialize WebSocket for fallback
     audioManagerRef.current.initialize();
     if (canvasRef.current) {
       canvasManagerRef.current.initialize(canvasRef.current);
@@ -130,20 +173,75 @@ export default function PlayPage() {
     });
 
     socketManager.onDisconnect(() => setConnected(false));
-    socketManager.onFrame((data) => canvasManagerRef.current.renderFrame(data));
-    socketManager.onAudio((data) => audioManagerRef.current.playAudio(data));
+
+    // Only handle WebSocket frames if in websocket mode
+    socketManager.onFrame((data) => {
+      if (streamMode === "websocket" || streamMode === "both") {
+        canvasManagerRef.current.renderFrame(data);
+      }
+    });
+    socketManager.onAudio((data) => {
+      if (streamMode === "websocket" || streamMode === "both") {
+        audioManagerRef.current.playAudio(data);
+      }
+    });
+
+    // Always initialize WebRTC components (so they're ready for mode switching)
+    webrtcAudioPlayerRef.current.initialize();
+    if (canvasRef.current) {
+      webrtcVideoRendererRef.current.initialize(canvasRef.current);
+    }
+
+    const webrtcManager = webrtcManagerRef.current;
+
+    // Always connect the WebRTC signaling socket so it's ready
+    webrtcManager.connect();
+
+    webrtcManager.onVideoTrack((stream) => {
+      console.log("📹 Video track received");
+      webrtcVideoRendererRef.current.setVideoStream(stream);
+    });
+
+    webrtcManager.onAudioTrack((stream) => {
+      console.log("🔊 Audio track received");
+      webrtcAudioPlayerRef.current.setAudioStream(stream);
+      // Resume audio playback
+      webrtcAudioPlayerRef.current.resume();
+    });
+
+    // Handle audio data from DataChannel (fallback/primary method)
+    webrtcManager.onAudioData((audioData) => {
+      webrtcAudioPlayerRef.current.playPCMAudio(audioData);
+    });
+
+    webrtcManager.onConnected(() => {
+      setWebrtcConnected(true);
+      console.log("🎮 WebRTC peer connection connected!");
+    });
+
+    webrtcManager.onDisconnected(() => {
+      setWebrtcConnected(false);
+    });
+
+    webrtcManager.onError((error) => {
+      console.error("WebRTC error:", error);
+    });
 
     return () => {
       socketManager.disconnect();
       audioManagerRef.current.cleanup();
       inputManagerRef.current.cleanup();
+      webrtcManagerRef.current.disconnect();
+      webrtcVideoRendererRef.current.cleanup();
+      webrtcAudioPlayerRef.current.cleanup();
     };
-  }, []);
+  }, []); // Only run once on mount, not on streamMode changes
 
   // Re-initialize canvas when fullscreen state changes (canvas element changes)
   useEffect(() => {
     if (canvasRef.current) {
       canvasManagerRef.current.initialize(canvasRef.current);
+      webrtcVideoRendererRef.current.initialize(canvasRef.current);
     }
   }, [isFullscreen]);
 
@@ -155,14 +253,68 @@ export default function PlayPage() {
     return () => inputManagerRef.current.cleanup();
   }, [sessionId]);
 
+  // Handle stream mode change
+  const handleStreamModeChange = useCallback(
+    async (newMode: StreamMode) => {
+      setStreamMode(newMode);
+      if (sessionId) {
+        // Update server stream mode
+        const result = await setServerStreamMode(sessionId, newMode);
+        if (!result.success) {
+          console.error("Failed to change stream mode:", result.error);
+          return;
+        }
+
+        // Create WebRTC session if switching to webrtc mode
+        if (newMode === "webrtc" || newMode === "both") {
+          // Make sure WebRTC signaling socket is connected
+          if (!webrtcManagerRef.current.isSocketConnected()) {
+            webrtcManagerRef.current.connect();
+            // Wait a bit for the socket to connect
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+
+          const webrtcSuccess = await webrtcManagerRef.current.createSession(
+            sessionId
+          );
+          if (webrtcSuccess) {
+            console.log("✅ WebRTC session created for mode switch");
+            setWebrtcConnected(true);
+          } else {
+            console.warn("WebRTC session creation failed during mode switch");
+          }
+        }
+      }
+    },
+    [sessionId]
+  );
+
   const createSession = async () => {
     try {
       setError(null);
       setStatus("Creating...");
-      const data = await createGameSession(rom);
+      const data = await createGameSession(rom, streamMode);
       setSessionId(data.sessionId);
       setStatus("Created");
+
+      // Subscribe to WebSocket session
       socketManagerRef.current.subscribeToSession(data.sessionId);
+
+      // Create WebRTC session if in webrtc or both mode
+      if (streamMode === "webrtc" || streamMode === "both") {
+        const webrtcSuccess = await webrtcManagerRef.current.createSession(
+          data.sessionId
+        );
+        if (!webrtcSuccess) {
+          console.warn(
+            "WebRTC session creation failed, falling back to WebSocket"
+          );
+          if (streamMode === "webrtc") {
+            setStreamMode("websocket");
+          }
+        }
+      }
+
       return data.sessionId;
     } catch (err) {
       if (err instanceof PlayApiError) {
@@ -365,6 +517,47 @@ export default function PlayPage() {
               </TouchButton>
 
               <div className="flex items-center gap-2">
+                {/* Stream Mode Toggle */}
+                <button
+                  onClick={() =>
+                    handleStreamModeChange(
+                      streamMode === "websocket" ? "webrtc" : "websocket"
+                    )
+                  }
+                  className={`p-2 rounded-lg flex items-center gap-1 ${
+                    streamMode === "webrtc"
+                      ? "bg-green-600/80 text-green-300"
+                      : "bg-cyan-600/80 text-cyan-300"
+                  }`}
+                  title={`Mode: ${streamMode.toUpperCase()}`}
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    {streamMode === "webrtc" ? (
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"
+                      />
+                    ) : (
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 12h14M12 5l7 7-7 7"
+                      />
+                    )}
+                  </svg>
+                  <span className="text-[10px] font-bold">
+                    {streamMode === "webrtc" ? "RTC" : "WS"}
+                  </span>
+                </button>
+
                 <button
                   onClick={() => setShowControls(false)}
                   className="p-2 bg-slate-800/80 rounded-lg text-slate-400"
@@ -670,6 +863,48 @@ export default function PlayPage() {
                   </div>
 
                   <div className="flex gap-1">
+                    {/* Stream Mode Toggle - Mobile */}
+                    {isMobile && (
+                      <Button
+                        onClick={() =>
+                          handleStreamModeChange(
+                            streamMode === "websocket" ? "webrtc" : "websocket"
+                          )
+                        }
+                        disabled={isPlaying}
+                        size="sm"
+                        className={`font-bold px-1.5 py-1 rounded h-6 ${
+                          streamMode === "webrtc"
+                            ? "bg-green-600 hover:bg-green-500"
+                            : "bg-cyan-600 hover:bg-cyan-500"
+                        } text-white disabled:opacity-40`}
+                        title={`Mode: ${streamMode.toUpperCase()}`}
+                      >
+                        <svg
+                          className="w-3 h-3"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          {streamMode === "webrtc" ? (
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"
+                            />
+                          ) : (
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M5 12h14M12 5l7 7-7 7"
+                            />
+                          )}
+                        </svg>
+                      </Button>
+                    )}
+
                     {/* Fullscreen Button - Mobile */}
                     {isMobile && sessionId && (
                       <Button
@@ -913,6 +1148,88 @@ export default function PlayPage() {
                     Enter
                   </kbd>
                 </div>
+              </div>
+            </div>
+
+            {/* Stream Mode Selector */}
+            <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl backdrop-blur-sm p-4">
+              <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                <svg
+                  className="w-4 h-4 text-green-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"
+                  />
+                </svg>
+                STREAM MODE
+              </h3>
+
+              <div className="space-y-2">
+                <button
+                  onClick={() => handleStreamModeChange("websocket")}
+                  disabled={isPlaying}
+                  className={`w-full p-2 rounded-lg text-xs font-mono transition-all ${
+                    streamMode === "websocket"
+                      ? "bg-cyan-600/50 text-cyan-300 border border-cyan-500/50"
+                      : "bg-slate-800/50 text-slate-400 border border-slate-700/50 hover:bg-slate-700/50"
+                  } ${isPlaying ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span>WebSocket</span>
+                    {streamMode === "websocket" && (
+                      <span className="w-2 h-2 bg-cyan-400 rounded-full" />
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1 text-left">
+                    Standard latency, reliable
+                  </p>
+                </button>
+
+                <button
+                  onClick={() => handleStreamModeChange("webrtc")}
+                  disabled={isPlaying}
+                  className={`w-full p-2 rounded-lg text-xs font-mono transition-all ${
+                    streamMode === "webrtc"
+                      ? "bg-green-600/50 text-green-300 border border-green-500/50"
+                      : "bg-slate-800/50 text-slate-400 border border-slate-700/50 hover:bg-slate-700/50"
+                  } ${isPlaying ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span>WebRTC</span>
+                    {streamMode === "webrtc" && (
+                      <span className="w-2 h-2 bg-green-400 rounded-full" />
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1 text-left">
+                    Low latency, experimental
+                  </p>
+                </button>
+
+                {/* WebRTC Status Indicator */}
+                {(streamMode === "webrtc" || streamMode === "both") && (
+                  <div className="mt-2 p-2 bg-slate-800/30 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          webrtcConnected
+                            ? "bg-green-400 animate-pulse"
+                            : "bg-yellow-400"
+                        }`}
+                      />
+                      <span className="text-[10px] font-mono text-slate-400">
+                        {webrtcConnected
+                          ? "WebRTC Connected"
+                          : "WebRTC Connecting..."}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

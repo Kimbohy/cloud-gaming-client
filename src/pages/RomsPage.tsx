@@ -429,7 +429,7 @@ export default function RomsPage() {
                   {/* Image Container with Gaming Effects */}
                   <div className="relative overflow-hidden bg-linear-to-br from-slate-800 to-slate-900">
                     <img
-                      src={"http://localhost:3000" + game.imagePath}
+                      src={"http://192.168.57.120:3000" + game.imagePath}
                       alt={game.name}
                       className="w-full h-full object-cover transition-all duration-500 group-hover:scale-110 group-hover:brightness-75"
                       onError={(e) => {
