@@ -544,12 +544,13 @@ export class WebRTCManager {
   }
 }
 
-// WebRTC Video Renderer - renders MediaStream to canvas
+// WebRTC Video Renderer - renders MediaStream to canvas using WebCodecs or fallback
 export class WebRTCVideoRenderer {
   private videoElement: HTMLVideoElement | null = null;
   private canvas: HTMLCanvasElement | null = null;
   private context: CanvasRenderingContext2D | null = null;
   private animationFrameId: number | null = null;
+  private abortController: AbortController | null = null;
 
   initialize(canvas: HTMLCanvasElement): void {
     this.canvas = canvas;
@@ -557,23 +558,13 @@ export class WebRTCVideoRenderer {
       alpha: false, // Disable alpha for better performance
       desynchronized: true, // Reduce latency by not syncing with display
     });
-
-    // Create hidden video element for rendering with low latency
-    this.videoElement = document.createElement("video");
-    this.videoElement.autoplay = true;
-    this.videoElement.playsInline = true;
-    this.videoElement.muted = true; // Audio handled separately
-    // Low latency optimizations
-    (this.videoElement as any).disableRemotePlayback = true;
-    this.videoElement.preload = "none";
-    // Request low latency playback
-    if ("requestVideoFrameCallback" in this.videoElement) {
-      this.videoElement.setAttribute("playsinline", "");
-    }
   }
 
   setVideoStream(stream: MediaStream): void {
-    if (!this.videoElement) return;
+    if (!this.canvas || !this.context) return;
+
+    // Stop previous rendering
+    this.cleanup();
 
     // Configure stream for low latency
     stream.getVideoTracks().forEach((track) => {
@@ -583,15 +574,77 @@ export class WebRTCVideoRenderer {
       }
     });
 
+    // Try WebCodecs (MediaStreamTrackProcessor) for lowest latency
+    if ("MediaStreamTrackProcessor" in window) {
+      console.log("[WebRTC Video] Using WebCodecs (MediaStreamTrackProcessor)");
+      this.renderWithWebCodecs(stream);
+    } else {
+      console.log("[WebRTC Video] Fallback to HTMLVideoElement");
+      this.renderWithVideoElement(stream);
+    }
+  }
+
+  private async renderWithWebCodecs(stream: MediaStream): Promise<void> {
+    const track = stream.getVideoTracks()[0];
+    if (!track) return;
+
+    this.abortController = new AbortController();
+    const signal = this.abortController.signal;
+
+    try {
+      // @ts-ignore - WebCodecs API might not be in TS types yet
+      const processor = new MediaStreamTrackProcessor({ track });
+      const reader = processor.readable.getReader();
+
+      while (!signal.aborted) {
+        const { done, value: frame } = await reader.read();
+        if (done) break;
+
+        if (frame) {
+          if (!signal.aborted && this.context && this.canvas) {
+            // Draw frame directly to canvas
+            this.context.drawImage(
+              frame,
+              0,
+              0,
+              this.canvas.width,
+              this.canvas.height
+            );
+          }
+          frame.close(); // Important: release memory immediately
+        }
+      }
+      reader.releaseLock();
+    } catch (error) {
+      console.error("[WebRTC Video] WebCodecs error:", error);
+      // If WebCodecs fails, try fallback?
+      if (!signal.aborted) {
+        this.renderWithVideoElement(stream);
+      }
+    }
+  }
+
+  private renderWithVideoElement(stream: MediaStream): void {
+    // Create hidden video element for rendering
+    if (!this.videoElement) {
+      this.videoElement = document.createElement("video");
+      this.videoElement.autoplay = true;
+      this.videoElement.playsInline = true;
+      this.videoElement.muted = true;
+      (this.videoElement as any).disableRemotePlayback = true;
+      this.videoElement.preload = "none";
+      if ("requestVideoFrameCallback" in this.videoElement) {
+        this.videoElement.setAttribute("playsinline", "");
+      }
+    }
+
     this.videoElement.srcObject = stream;
 
-    // Use low latency playback
     const playPromise = this.videoElement.play();
     if (playPromise) {
       playPromise.catch(console.error);
     }
 
-    // Start optimized render loop
     this.startRenderLoop();
   }
 
@@ -602,8 +655,8 @@ export class WebRTCVideoRenderer {
 
     // Use requestVideoFrameCallback for lowest latency if available
     if (
-      "requestVideoFrameCallback" in HTMLVideoElement.prototype &&
-      this.videoElement
+      this.videoElement &&
+      "requestVideoFrameCallback" in HTMLVideoElement.prototype
     ) {
       const renderVideoFrame = () => {
         if (this.videoElement && this.context && this.canvas) {
@@ -645,22 +698,29 @@ export class WebRTCVideoRenderer {
   }
 
   cleanup(): void {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
+
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
 
     if (this.videoElement) {
+      this.videoElement.pause();
       this.videoElement.srcObject = null;
       this.videoElement = null;
     }
 
-    this.canvas = null;
-    this.context = null;
+    // Don't clear canvas/context as they might be reused
   }
 }
 
 // WebRTC Audio Player - plays MediaStream audio or raw PCM data with low latency
+import audioWorkletUrl from "../lib/audio-worklet-processor.ts?worker&url";
+
 export class WebRTCAudioPlayer {
   private audioElement: HTMLAudioElement | null = null;
   private audioContext: AudioContext | null = null;
@@ -668,16 +728,17 @@ export class WebRTCAudioPlayer {
   private gainNode: GainNode | null = null;
 
   // Low-latency PCM audio playback
+  private audioWorkletNode: AudioWorkletNode | null = null;
   private scriptProcessor: ScriptProcessorNode | null = null;
   private audioQueue: Float32Array[] = [];
   private queuedSamples: number = 0;
   private currentBuffer: Float32Array | null = null;
   private currentBufferOffset: number = 0;
+  private lastUnderrun: number = 0;
   private maxQueueMs: number = 60; // Max 60ms buffer for ultra-low latency
   private channels: number = 2;
-  private lastUnderrun: number = 0; // Track underruns for adaptive buffering
 
-  initialize(): void {
+  async initialize(): Promise<void> {
     // Create audio element as fallback for MediaStream
     this.audioElement = document.createElement("audio");
     this.audioElement.autoplay = true;
@@ -703,21 +764,49 @@ export class WebRTCAudioPlayer {
       this.gainNode.connect(this.audioContext.destination);
       this.gainNode.gain.value = 1.0;
 
-      // Use ScriptProcessorNode for low-latency audio output
-      // Buffer size of 512 gives ~10.7ms latency at 48kHz (smallest stable size)
-      const bufferSize = 512;
-      this.scriptProcessor = this.audioContext.createScriptProcessor(
-        bufferSize,
-        0, // No input channels
-        2 // Stereo output
-      );
+      // Load AudioWorklet module
+      try {
+        await this.audioContext.audioWorklet.addModule(audioWorkletUrl);
 
-      this.scriptProcessor.onaudioprocess = (event) => {
-        this.processAudio(event);
-      };
+        this.audioWorkletNode = new AudioWorkletNode(
+          this.audioContext,
+          "webrtc-audio-processor",
+          {
+            outputChannelCount: [2], // Stereo output
+          }
+        );
 
-      // Connect: scriptProcessor -> gain -> destination
-      this.scriptProcessor.connect(this.gainNode);
+        this.audioWorkletNode.connect(this.gainNode);
+
+        // Handle messages from the processor (e.g. latency stats)
+        this.audioWorkletNode.port.onmessage = (event) => {
+          if (event.data.type === "latency") {
+            // console.log(`[AudioWorklet] Latency: ${event.data.latencyMs.toFixed(1)}ms`);
+          }
+        };
+
+        console.log("[WebRTC Audio] AudioWorklet initialized successfully");
+      } catch (e) {
+        console.error(
+          "[WebRTC Audio] Failed to load AudioWorklet, falling back to ScriptProcessor:",
+          e
+        );
+
+        // Fallback to ScriptProcessorNode
+        const bufferSize = 512;
+        this.scriptProcessor = this.audioContext.createScriptProcessor(
+          bufferSize,
+          0, // No input channels
+          2 // Stereo output
+        );
+
+        this.scriptProcessor.onaudioprocess = (event) => {
+          this.processAudio(event);
+        };
+
+        this.scriptProcessor.connect(this.gainNode);
+        console.log("[WebRTC Audio] ScriptProcessor initialized as fallback");
+      }
 
       console.log(
         "[WebRTC Audio] Low-latency audio initialized:",
@@ -792,7 +881,7 @@ export class WebRTCAudioPlayer {
     if (hadUnderrun) {
       const now = Date.now();
       if (now - this.lastUnderrun > 1000) {
-        console.warn("[WebRTC Audio] Buffer underrun - waiting for data");
+        // console.warn("[WebRTC Audio] Buffer underrun - waiting for data");
         this.lastUnderrun = now;
       }
     }
@@ -804,7 +893,7 @@ export class WebRTCAudioPlayer {
     sampleRate: number;
     channels: number;
   }): void {
-    if (!this.audioContext || !this.scriptProcessor) {
+    if (!this.audioContext) {
       return;
     }
 
@@ -838,31 +927,38 @@ export class WebRTCAudioPlayer {
       processedSamples = float32Array;
     }
 
-    // Calculate queue limits - keep buffer small for low latency
-    const maxQueueSamples =
-      (this.maxQueueMs / 1000) * this.audioContext.sampleRate;
-
-    // Drop old samples if queue is too large (to reduce latency)
-    while (this.queuedSamples > maxQueueSamples && this.audioQueue.length > 0) {
-      const dropped = this.audioQueue.shift();
-      if (dropped) {
-        this.queuedSamples -= dropped.length / channels;
-      }
+    // Use AudioWorklet if available
+    if (this.audioWorkletNode) {
+      this.audioWorkletNode.port.postMessage(
+        {
+          type: "add-samples",
+          samples: processedSamples,
+          sampleRate: this.audioContext.sampleRate,
+          channels: channels,
+        },
+        [processedSamples.buffer]
+      ); // Transfer buffer ownership for performance
     }
+    // Fallback to ScriptProcessor
+    else if (this.scriptProcessor) {
+      // Calculate queue limits - keep buffer small for low latency
+      const maxQueueSamples =
+        (this.maxQueueMs / 1000) * this.audioContext.sampleRate;
 
-    // Add new samples to queue
-    this.audioQueue.push(processedSamples);
-    this.queuedSamples += processedSamples.length / channels;
+      // Drop old samples if queue is too large (to reduce latency)
+      while (
+        this.queuedSamples > maxQueueSamples &&
+        this.audioQueue.length > 0
+      ) {
+        const dropped = this.audioQueue.shift();
+        if (dropped) {
+          this.queuedSamples -= dropped.length / channels;
+        }
+      }
 
-    // Log latency occasionally for debugging
-    if (Math.random() < 0.005) {
-      const latencyMs =
-        (this.queuedSamples / this.audioContext.sampleRate) * 1000;
-      console.log(
-        `[WebRTC Audio] Queue latency: ${latencyMs.toFixed(1)}ms, buffers: ${
-          this.audioQueue.length
-        }`
-      );
+      // Add new samples to queue
+      this.audioQueue.push(processedSamples);
+      this.queuedSamples += processedSamples.length / channels;
     }
   }
 
@@ -1042,6 +1138,10 @@ export class WebRTCAudioPlayer {
 
   // Clear audio queue to reduce latency
   clearQueue(): void {
+    if (this.audioWorkletNode) {
+      this.audioWorkletNode.port.postMessage({ type: "clear-queue" });
+    }
+    // Also clear ScriptProcessor queue
     this.audioQueue = [];
     this.queuedSamples = 0;
     this.currentBuffer = null;
@@ -1049,6 +1149,12 @@ export class WebRTCAudioPlayer {
   }
 
   cleanup(): void {
+    // Clean up AudioWorklet
+    if (this.audioWorkletNode) {
+      this.audioWorkletNode.disconnect();
+      this.audioWorkletNode = null;
+    }
+
     // Clean up ScriptProcessor
     if (this.scriptProcessor) {
       this.scriptProcessor.disconnect();
