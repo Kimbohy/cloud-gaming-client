@@ -309,15 +309,38 @@ export class WebRTCManager {
       return;
     }
 
-    const message = JSON.stringify({
-      type: "input",
-      button,
-      state,
-      timestamp: Date.now(),
-    });
+    // Binary protocol for ultra-low latency (2 bytes vs ~80 bytes JSON)
+    // Byte 0: Button ID
+    // Byte 1: State (0=UP, 1=DOWN)
+    const BUTTON_MAP: Record<string, number> = {
+      A: 0,
+      B: 1,
+      SELECT: 2,
+      START: 3,
+      UP: 4,
+      DOWN: 5,
+      LEFT: 6,
+      RIGHT: 7,
+      L: 8,
+      R: 9,
+    };
 
-    console.log(`[WebRTC] Sending input: ${button} ${state}`);
-    this.dataChannel.send(message);
+    const buttonId = BUTTON_MAP[button];
+    if (buttonId !== undefined) {
+      const buffer = new Uint8Array(2);
+      buffer[0] = buttonId;
+      buffer[1] = state === "down" ? 1 : 0;
+      this.dataChannel.send(buffer);
+    } else {
+      // Fallback to JSON for unknown buttons or debug
+      const message = JSON.stringify({
+        type: "input",
+        button,
+        state,
+        timestamp: Date.now(),
+      });
+      this.dataChannel.send(message);
+    }
   }
 
   // Event callbacks
