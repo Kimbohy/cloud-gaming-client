@@ -39,6 +39,74 @@ export class WebRTCManager {
   private onDisconnectedCallback?: () => void;
   private onErrorCallback?: (error: Error) => void;
 
+  // IMA ADPCM Tables
+  private readonly indexTable = [
+    -1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8,
+  ];
+
+  private readonly stepTable = [
+    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
+    50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230,
+    253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963,
+    1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024,
+    3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493,
+    10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086,
+    29794, 32767,
+  ];
+
+  private decodeADPCM(data: Uint8Array, channels: number): Int16Array {
+    let bufferIdx = 0;
+    const predictedSample = [0, 0];
+    const index = [0, 0];
+
+    // Read initial state
+    for (let ch = 0; ch < channels; ch++) {
+      const low = data[bufferIdx++];
+      const high = data[bufferIdx++];
+      predictedSample[ch] = (high << 8) | low;
+      if (predictedSample[ch] & 0x8000) predictedSample[ch] -= 0x10000;
+
+      index[ch] = data[bufferIdx++];
+      bufferIdx++; // Reserved
+    }
+
+    const dataLen = data.length - bufferIdx;
+    const samplesCount = dataLen * 2;
+    const output = new Int16Array(samplesCount);
+
+    let outIdx = 0;
+
+    for (let i = 0; i < dataLen; i++) {
+      const byte = data[bufferIdx++];
+
+      for (let nibble = 0; nibble < 2; nibble++) {
+        const delta = nibble === 0 ? byte & 0x0f : (byte >> 4) & 0x0f;
+        const ch = outIdx % channels;
+
+        const step = this.stepTable[index[ch]];
+        let vpdiff = step >> 3;
+
+        if ((delta & 4) !== 0) vpdiff += step;
+        if ((delta & 2) !== 0) vpdiff += step >> 1;
+        if ((delta & 1) !== 0) vpdiff += step >> 2;
+
+        if ((delta & 8) !== 0) predictedSample[ch] -= vpdiff;
+        else predictedSample[ch] += vpdiff;
+
+        if (predictedSample[ch] > 32767) predictedSample[ch] = 32767;
+        else if (predictedSample[ch] < -32768) predictedSample[ch] = -32768;
+
+        output[outIdx++] = predictedSample[ch];
+
+        index[ch] += this.indexTable[delta & 7];
+        if (index[ch] < 0) index[ch] = 0;
+        else if (index[ch] > 88) index[ch] = 88;
+      }
+    }
+
+    return output;
+  }
+
   // ICE servers configuration - optimized for low latency
   private readonly iceServers: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
@@ -210,6 +278,12 @@ export class WebRTCManager {
     this.peerConnection.ontrack = (event) => {
       console.log(`[WebRTC] Received track: ${event.track.kind}`);
 
+      // Optimize receiver for low latency
+      // playoutDelayHint = 0 tells the browser to buffer as little as possible
+      if (event.receiver && "playoutDelayHint" in event.receiver) {
+        (event.receiver as any).playoutDelayHint = 0;
+      }
+
       if (event.track.kind === "video") {
         const videoStream = new MediaStream([event.track]);
         this.onVideoTrackCallback?.(videoStream);
@@ -255,13 +329,53 @@ export class WebRTCManager {
         const buffer = event.data as ArrayBuffer;
         const dataView = new DataView(buffer);
 
-        // Parse header (12 bytes)
+        // Parse header (16 bytes)
+        // [SampleRate(4)][Channels(4)][Format(4)][Length(4)]
         const sampleRate = dataView.getUint32(0, true);
         const channels = dataView.getUint32(4, true);
-        const samplesLength = dataView.getUint32(8, true);
 
-        // Extract audio samples
-        const audioData = new Int16Array(buffer, 12, samplesLength);
+        // Check if we have the new format (16 bytes header) or old (12 bytes)
+        // We can guess by checking buffer length vs expected length
+        // But since we updated server, let's assume new format or check format field
+
+        let format = 0; // 0=PCM
+        let dataOffset = 12;
+        let dataLength = 0;
+
+        // Heuristic: if buffer length >= 16, check if 3rd word looks like format (0 or 1)
+        // and 4th word looks like length matching buffer size
+        if (buffer.byteLength >= 16) {
+          const potentialFormat = dataView.getUint32(8, true);
+          const potentialLength = dataView.getUint32(12, true);
+
+          if (
+            (potentialFormat === 0 || potentialFormat === 1) &&
+            16 + potentialLength === buffer.byteLength
+          ) {
+            format = potentialFormat;
+            dataLength = potentialLength;
+            dataOffset = 16;
+          } else {
+            // Fallback to old format
+            dataLength = dataView.getUint32(8, true);
+            dataOffset = 12;
+          }
+        } else {
+          // Old format
+          dataLength = dataView.getUint32(8, true);
+          dataOffset = 12;
+        }
+
+        let audioData: Int16Array;
+
+        if (format === 1) {
+          // ADPCM
+          const adpcmData = new Uint8Array(buffer, dataOffset, dataLength);
+          audioData = this.decodeADPCM(adpcmData, channels);
+        } else {
+          // PCM
+          audioData = new Int16Array(buffer, dataOffset, dataLength / 2);
+        }
 
         // Call callback with audio data
         this.onAudioDataCallback?.({
@@ -309,15 +423,38 @@ export class WebRTCManager {
       return;
     }
 
-    const message = JSON.stringify({
-      type: "input",
-      button,
-      state,
-      timestamp: Date.now(),
-    });
+    // Binary protocol for ultra-low latency (2 bytes vs ~80 bytes JSON)
+    // Byte 0: Button ID
+    // Byte 1: State (0=UP, 1=DOWN)
+    const BUTTON_MAP: Record<string, number> = {
+      A: 0,
+      B: 1,
+      SELECT: 2,
+      START: 3,
+      UP: 4,
+      DOWN: 5,
+      LEFT: 6,
+      RIGHT: 7,
+      L: 8,
+      R: 9,
+    };
 
-    console.log(`[WebRTC] Sending input: ${button} ${state}`);
-    this.dataChannel.send(message);
+    const buttonId = BUTTON_MAP[button];
+    if (buttonId !== undefined) {
+      const buffer = new Uint8Array(2);
+      buffer[0] = buttonId;
+      buffer[1] = state === "down" ? 1 : 0;
+      this.dataChannel.send(buffer);
+    } else {
+      // Fallback to JSON for unknown buttons or debug
+      const message = JSON.stringify({
+        type: "input",
+        button,
+        state,
+        timestamp: Date.now(),
+      });
+      this.dataChannel.send(message);
+    }
   }
 
   // Event callbacks
@@ -407,12 +544,13 @@ export class WebRTCManager {
   }
 }
 
-// WebRTC Video Renderer - renders MediaStream to canvas
+// WebRTC Video Renderer - renders MediaStream to canvas using WebCodecs or fallback
 export class WebRTCVideoRenderer {
   private videoElement: HTMLVideoElement | null = null;
   private canvas: HTMLCanvasElement | null = null;
   private context: CanvasRenderingContext2D | null = null;
   private animationFrameId: number | null = null;
+  private abortController: AbortController | null = null;
 
   initialize(canvas: HTMLCanvasElement): void {
     this.canvas = canvas;
@@ -420,23 +558,13 @@ export class WebRTCVideoRenderer {
       alpha: false, // Disable alpha for better performance
       desynchronized: true, // Reduce latency by not syncing with display
     });
-
-    // Create hidden video element for rendering with low latency
-    this.videoElement = document.createElement("video");
-    this.videoElement.autoplay = true;
-    this.videoElement.playsInline = true;
-    this.videoElement.muted = true; // Audio handled separately
-    // Low latency optimizations
-    (this.videoElement as any).disableRemotePlayback = true;
-    this.videoElement.preload = "none";
-    // Request low latency playback
-    if ("requestVideoFrameCallback" in this.videoElement) {
-      this.videoElement.setAttribute("playsinline", "");
-    }
   }
 
   setVideoStream(stream: MediaStream): void {
-    if (!this.videoElement) return;
+    if (!this.canvas || !this.context) return;
+
+    // Stop previous rendering
+    this.cleanup();
 
     // Configure stream for low latency
     stream.getVideoTracks().forEach((track) => {
@@ -446,15 +574,77 @@ export class WebRTCVideoRenderer {
       }
     });
 
+    // Try WebCodecs (MediaStreamTrackProcessor) for lowest latency
+    if ("MediaStreamTrackProcessor" in window) {
+      console.log("[WebRTC Video] Using WebCodecs (MediaStreamTrackProcessor)");
+      this.renderWithWebCodecs(stream);
+    } else {
+      console.log("[WebRTC Video] Fallback to HTMLVideoElement");
+      this.renderWithVideoElement(stream);
+    }
+  }
+
+  private async renderWithWebCodecs(stream: MediaStream): Promise<void> {
+    const track = stream.getVideoTracks()[0];
+    if (!track) return;
+
+    this.abortController = new AbortController();
+    const signal = this.abortController.signal;
+
+    try {
+      // @ts-ignore - WebCodecs API might not be in TS types yet
+      const processor = new MediaStreamTrackProcessor({ track });
+      const reader = processor.readable.getReader();
+
+      while (!signal.aborted) {
+        const { done, value: frame } = await reader.read();
+        if (done) break;
+
+        if (frame) {
+          if (!signal.aborted && this.context && this.canvas) {
+            // Draw frame directly to canvas
+            this.context.drawImage(
+              frame,
+              0,
+              0,
+              this.canvas.width,
+              this.canvas.height
+            );
+          }
+          frame.close(); // Important: release memory immediately
+        }
+      }
+      reader.releaseLock();
+    } catch (error) {
+      console.error("[WebRTC Video] WebCodecs error:", error);
+      // If WebCodecs fails, try fallback?
+      if (!signal.aborted) {
+        this.renderWithVideoElement(stream);
+      }
+    }
+  }
+
+  private renderWithVideoElement(stream: MediaStream): void {
+    // Create hidden video element for rendering
+    if (!this.videoElement) {
+      this.videoElement = document.createElement("video");
+      this.videoElement.autoplay = true;
+      this.videoElement.playsInline = true;
+      this.videoElement.muted = true;
+      (this.videoElement as any).disableRemotePlayback = true;
+      this.videoElement.preload = "none";
+      if ("requestVideoFrameCallback" in this.videoElement) {
+        this.videoElement.setAttribute("playsinline", "");
+      }
+    }
+
     this.videoElement.srcObject = stream;
 
-    // Use low latency playback
     const playPromise = this.videoElement.play();
     if (playPromise) {
       playPromise.catch(console.error);
     }
 
-    // Start optimized render loop
     this.startRenderLoop();
   }
 
@@ -465,8 +655,8 @@ export class WebRTCVideoRenderer {
 
     // Use requestVideoFrameCallback for lowest latency if available
     if (
-      "requestVideoFrameCallback" in HTMLVideoElement.prototype &&
-      this.videoElement
+      this.videoElement &&
+      "requestVideoFrameCallback" in HTMLVideoElement.prototype
     ) {
       const renderVideoFrame = () => {
         if (this.videoElement && this.context && this.canvas) {
@@ -508,22 +698,29 @@ export class WebRTCVideoRenderer {
   }
 
   cleanup(): void {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
+
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
 
     if (this.videoElement) {
+      this.videoElement.pause();
       this.videoElement.srcObject = null;
       this.videoElement = null;
     }
 
-    this.canvas = null;
-    this.context = null;
+    // Don't clear canvas/context as they might be reused
   }
 }
 
 // WebRTC Audio Player - plays MediaStream audio or raw PCM data with low latency
+import audioWorkletUrl from "../lib/audio-worklet-processor.ts?worker&url";
+
 export class WebRTCAudioPlayer {
   private audioElement: HTMLAudioElement | null = null;
   private audioContext: AudioContext | null = null;
@@ -531,16 +728,17 @@ export class WebRTCAudioPlayer {
   private gainNode: GainNode | null = null;
 
   // Low-latency PCM audio playback
+  private audioWorkletNode: AudioWorkletNode | null = null;
   private scriptProcessor: ScriptProcessorNode | null = null;
   private audioQueue: Float32Array[] = [];
   private queuedSamples: number = 0;
   private currentBuffer: Float32Array | null = null;
   private currentBufferOffset: number = 0;
+  private lastUnderrun: number = 0;
   private maxQueueMs: number = 60; // Max 60ms buffer for ultra-low latency
   private channels: number = 2;
-  private lastUnderrun: number = 0; // Track underruns for adaptive buffering
 
-  initialize(): void {
+  async initialize(): Promise<void> {
     // Create audio element as fallback for MediaStream
     this.audioElement = document.createElement("audio");
     this.audioElement.autoplay = true;
@@ -566,21 +764,49 @@ export class WebRTCAudioPlayer {
       this.gainNode.connect(this.audioContext.destination);
       this.gainNode.gain.value = 1.0;
 
-      // Use ScriptProcessorNode for low-latency audio output
-      // Buffer size of 512 gives ~10.7ms latency at 48kHz (smallest stable size)
-      const bufferSize = 512;
-      this.scriptProcessor = this.audioContext.createScriptProcessor(
-        bufferSize,
-        0, // No input channels
-        2 // Stereo output
-      );
+      // Load AudioWorklet module
+      try {
+        await this.audioContext.audioWorklet.addModule(audioWorkletUrl);
 
-      this.scriptProcessor.onaudioprocess = (event) => {
-        this.processAudio(event);
-      };
+        this.audioWorkletNode = new AudioWorkletNode(
+          this.audioContext,
+          "webrtc-audio-processor",
+          {
+            outputChannelCount: [2], // Stereo output
+          }
+        );
 
-      // Connect: scriptProcessor -> gain -> destination
-      this.scriptProcessor.connect(this.gainNode);
+        this.audioWorkletNode.connect(this.gainNode);
+
+        // Handle messages from the processor (e.g. latency stats)
+        this.audioWorkletNode.port.onmessage = (event) => {
+          if (event.data.type === "latency") {
+            // console.log(`[AudioWorklet] Latency: ${event.data.latencyMs.toFixed(1)}ms`);
+          }
+        };
+
+        console.log("[WebRTC Audio] AudioWorklet initialized successfully");
+      } catch (e) {
+        console.error(
+          "[WebRTC Audio] Failed to load AudioWorklet, falling back to ScriptProcessor:",
+          e
+        );
+
+        // Fallback to ScriptProcessorNode
+        const bufferSize = 512;
+        this.scriptProcessor = this.audioContext.createScriptProcessor(
+          bufferSize,
+          0, // No input channels
+          2 // Stereo output
+        );
+
+        this.scriptProcessor.onaudioprocess = (event) => {
+          this.processAudio(event);
+        };
+
+        this.scriptProcessor.connect(this.gainNode);
+        console.log("[WebRTC Audio] ScriptProcessor initialized as fallback");
+      }
 
       console.log(
         "[WebRTC Audio] Low-latency audio initialized:",
@@ -655,7 +881,7 @@ export class WebRTCAudioPlayer {
     if (hadUnderrun) {
       const now = Date.now();
       if (now - this.lastUnderrun > 1000) {
-        console.warn("[WebRTC Audio] Buffer underrun - waiting for data");
+        // console.warn("[WebRTC Audio] Buffer underrun - waiting for data");
         this.lastUnderrun = now;
       }
     }
@@ -667,7 +893,7 @@ export class WebRTCAudioPlayer {
     sampleRate: number;
     channels: number;
   }): void {
-    if (!this.audioContext || !this.scriptProcessor) {
+    if (!this.audioContext) {
       return;
     }
 
@@ -701,31 +927,38 @@ export class WebRTCAudioPlayer {
       processedSamples = float32Array;
     }
 
-    // Calculate queue limits - keep buffer small for low latency
-    const maxQueueSamples =
-      (this.maxQueueMs / 1000) * this.audioContext.sampleRate;
-
-    // Drop old samples if queue is too large (to reduce latency)
-    while (this.queuedSamples > maxQueueSamples && this.audioQueue.length > 0) {
-      const dropped = this.audioQueue.shift();
-      if (dropped) {
-        this.queuedSamples -= dropped.length / channels;
-      }
+    // Use AudioWorklet if available
+    if (this.audioWorkletNode) {
+      this.audioWorkletNode.port.postMessage(
+        {
+          type: "add-samples",
+          samples: processedSamples,
+          sampleRate: this.audioContext.sampleRate,
+          channels: channels,
+        },
+        [processedSamples.buffer]
+      ); // Transfer buffer ownership for performance
     }
+    // Fallback to ScriptProcessor
+    else if (this.scriptProcessor) {
+      // Calculate queue limits - keep buffer small for low latency
+      const maxQueueSamples =
+        (this.maxQueueMs / 1000) * this.audioContext.sampleRate;
 
-    // Add new samples to queue
-    this.audioQueue.push(processedSamples);
-    this.queuedSamples += processedSamples.length / channels;
+      // Drop old samples if queue is too large (to reduce latency)
+      while (
+        this.queuedSamples > maxQueueSamples &&
+        this.audioQueue.length > 0
+      ) {
+        const dropped = this.audioQueue.shift();
+        if (dropped) {
+          this.queuedSamples -= dropped.length / channels;
+        }
+      }
 
-    // Log latency occasionally for debugging
-    if (Math.random() < 0.005) {
-      const latencyMs =
-        (this.queuedSamples / this.audioContext.sampleRate) * 1000;
-      console.log(
-        `[WebRTC Audio] Queue latency: ${latencyMs.toFixed(1)}ms, buffers: ${
-          this.audioQueue.length
-        }`
-      );
+      // Add new samples to queue
+      this.audioQueue.push(processedSamples);
+      this.queuedSamples += processedSamples.length / channels;
     }
   }
 
@@ -905,6 +1138,10 @@ export class WebRTCAudioPlayer {
 
   // Clear audio queue to reduce latency
   clearQueue(): void {
+    if (this.audioWorkletNode) {
+      this.audioWorkletNode.port.postMessage({ type: "clear-queue" });
+    }
+    // Also clear ScriptProcessor queue
     this.audioQueue = [];
     this.queuedSamples = 0;
     this.currentBuffer = null;
@@ -912,6 +1149,12 @@ export class WebRTCAudioPlayer {
   }
 
   cleanup(): void {
+    // Clean up AudioWorklet
+    if (this.audioWorkletNode) {
+      this.audioWorkletNode.disconnect();
+      this.audioWorkletNode = null;
+    }
+
     // Clean up ScriptProcessor
     if (this.scriptProcessor) {
       this.scriptProcessor.disconnect();
