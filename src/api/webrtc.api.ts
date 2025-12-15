@@ -743,7 +743,8 @@ export class WebRTCVideoRenderer {
 }
 
 // WebRTC Audio Player - plays MediaStream audio or raw PCM data with low latency
-import audioWorkletUrl from "../lib/audio-worklet-processor.ts?worker&url";
+// AudioWorklet is loaded from public folder as it needs to be a separate JS file
+const audioWorkletUrl = "/audio-worklet-processor.js";
 
 export class WebRTCAudioPlayer {
   private audioElement: HTMLAudioElement | null = null;
