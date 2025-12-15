@@ -23,8 +23,10 @@ import {
   WebRTCAudioPlayer,
   setStreamMode as setServerStreamMode,
 } from "@/api/webrtc.api";
+import { base64ToArrayBuffer } from "@/api/saveStates.api";
 import { useQueryState } from "nuqs";
 import { ControlsConfigDialog } from "@/components/ControlsConfigDialog";
+import { SaveStatesModal } from "@/components/SaveStatesModal";
 
 // Error state interface
 interface ErrorState {
@@ -60,6 +62,9 @@ export default function PlayPage() {
   // Controls config dialog state
   const [showControlsConfig, setShowControlsConfig] = useState(false);
   const [keyMappings, setKeyMappings] = useState<KeyMappings>(loadKeyMappings);
+
+  // Save states modal state
+  const [showSaveStatesModal, setShowSaveStatesModal] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameContainerRef = useRef<HTMLDivElement>(null);
@@ -255,6 +260,46 @@ export default function PlayPage() {
     setKeyMappings(newMappings);
     inputManagerRef.current.updateKeyMappings(newMappings);
   }, []);
+
+  // Handle save state request (called from SaveStatesModal)
+  const handleSaveState = useCallback(async (): Promise<{
+    stateData: string;
+    thumbnail: string | null;
+  } | null> => {
+    if (!sessionId) return null;
+
+    return new Promise((resolve) => {
+      webrtcManagerRef.current.saveState(sessionId, (result) => {
+        if (result.success && result.stateData) {
+          resolve({
+            stateData: result.stateData,
+            thumbnail: result.thumbnail ?? null,
+          });
+        } else {
+          console.error("Failed to save state:", result.error);
+          resolve(null);
+        }
+      });
+    });
+  }, [sessionId]);
+
+  // Handle load state request (called from SaveStatesModal)
+  const handleLoadState = useCallback(
+    async (stateData: ArrayBuffer): Promise<boolean> => {
+      if (!sessionId) return false;
+
+      const base64 = btoa(
+        String.fromCharCode(...new Uint8Array(stateData))
+      );
+
+      return new Promise((resolve) => {
+        webrtcManagerRef.current.loadState(sessionId, base64, (result) => {
+          resolve(result.success);
+        });
+      });
+    },
+    [sessionId]
+  );
 
   // Handle stream mode change
   const handleStreamModeChange = useCallback(
@@ -948,6 +993,32 @@ export default function PlayPage() {
                       <span className="hidden md:inline">START</span>
                     </Button>
 
+                    {/* Save/Load Button */}
+                    <Button
+                      onClick={() => setShowSaveStatesModal(true)}
+                      disabled={!sessionId || !isPlaying}
+                      size="sm"
+                      className={`bg-amber-600 hover:bg-amber-500 text-white font-bold rounded disabled:opacity-40 ${
+                        isMobile ? "px-1.5 py-1 h-6" : "px-3 md:px-4 py-2"
+                      }`}
+                      title="Save / Load State"
+                    >
+                      <svg
+                        className={isMobile ? "w-3 h-3" : "w-4 h-4 md:mr-2"}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                        />
+                      </svg>
+                      <span className="hidden md:inline">SAVE</span>
+                    </Button>
+
                     <Button
                       onClick={stopEmulation}
                       disabled={!sessionId}
@@ -1272,6 +1343,18 @@ export default function PlayPage() {
         onOpenChange={setShowControlsConfig}
         onMappingsChange={handleKeyMappingsChange}
       />
+
+      {/* Save States Modal */}
+      {sessionId && rom && (
+        <SaveStatesModal
+          isOpen={showSaveStatesModal}
+          onClose={() => setShowSaveStatesModal(false)}
+          romId={rom}
+          romName={name || gameData?.name || "Game"}
+          onSave={handleSaveState}
+          onLoad={handleLoadState}
+        />
+      )}
     </div>
   );
 }
