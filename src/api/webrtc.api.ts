@@ -35,6 +35,11 @@ export class WebRTCManager {
     sampleRate: number;
     channels: number;
   }) => void;
+  private onAudioDataADPCMCallback?: (audioData: {
+    adpcmData: Uint8Array;
+    sampleRate: number;
+    channels: number;
+  }) => void;
   private onConnectedCallback?: () => void;
   private onDisconnectedCallback?: () => void;
   private onErrorCallback?: (error: Error) => void;
@@ -366,23 +371,32 @@ export class WebRTCManager {
           dataOffset = 12;
         }
 
-        let audioData: Int16Array;
-
-        if (format === 1) {
-          // ADPCM
+        if (format === 1 && this.onAudioDataADPCMCallback) {
+          // ADPCM - send raw data to worklet for decoding (offloads Main Thread)
           const adpcmData = new Uint8Array(buffer, dataOffset, dataLength);
-          audioData = this.decodeADPCM(adpcmData, channels);
+          this.onAudioDataADPCMCallback({
+            adpcmData,
+            sampleRate,
+            channels,
+          });
+        } else if (format === 1) {
+          // ADPCM but no ADPCM callback - fallback to main thread decode
+          const adpcmData = new Uint8Array(buffer, dataOffset, dataLength);
+          const audioData = this.decodeADPCM(adpcmData, channels);
+          this.onAudioDataCallback?.({
+            samples: audioData,
+            sampleRate,
+            channels,
+          });
         } else {
           // PCM
-          audioData = new Int16Array(buffer, dataOffset, dataLength / 2);
+          const audioData = new Int16Array(buffer, dataOffset, dataLength / 2);
+          this.onAudioDataCallback?.({
+            samples: audioData,
+            sampleRate,
+            channels,
+          });
         }
-
-        // Call callback with audio data
-        this.onAudioDataCallback?.({
-          samples: audioData,
-          sampleRate,
-          channels,
-        });
       } catch (error) {
         console.error("[WebRTC] Failed to parse audio data:", error);
       }
@@ -474,6 +488,16 @@ export class WebRTCManager {
     }) => void
   ): void {
     this.onAudioDataCallback = callback;
+  }
+
+  onAudioDataADPCM(
+    callback: (audioData: {
+      adpcmData: Uint8Array;
+      sampleRate: number;
+      channels: number;
+    }) => void
+  ): void {
+    this.onAudioDataADPCMCallback = callback;
   }
 
   onConnected(callback: () => void): void {
@@ -959,6 +983,52 @@ export class WebRTCAudioPlayer {
       // Add new samples to queue
       this.audioQueue.push(processedSamples);
       this.queuedSamples += processedSamples.length / channels;
+    }
+  }
+
+  // Play ADPCM audio data - sends raw ADPCM to AudioWorklet for decoding
+  // This offloads decoding from Main Thread to the AudioWorklet thread
+  playADPCMAudio(audioData: {
+    adpcmData: Uint8Array;
+    sampleRate: number;
+    channels: number;
+  }): void {
+    if (!this.audioContext) {
+      return;
+    }
+
+    // Resume audio context if suspended
+    if (this.audioContext.state === "suspended") {
+      this.audioContext.resume().catch(console.error);
+      return;
+    }
+
+    const { adpcmData, sampleRate, channels } = audioData;
+    this.channels = channels;
+
+    if (adpcmData.length === 0) return;
+
+    // Send raw ADPCM directly to AudioWorklet for decoding
+    // This keeps the Main Thread free for UI rendering
+    if (this.audioWorkletNode) {
+      // Copy the data since we're transferring ownership
+      const adpcmCopy = new Uint8Array(adpcmData);
+      this.audioWorkletNode.port.postMessage(
+        {
+          type: "add-adpcm",
+          adpcmData: adpcmCopy,
+          sampleRate: sampleRate,
+          targetSampleRate: this.audioContext.sampleRate,
+          channels: channels,
+        },
+        [adpcmCopy.buffer]
+      ); // Transfer buffer ownership for performance
+    } else {
+      // Fallback: decode on main thread if AudioWorklet not available
+      console.warn(
+        "[WebRTC Audio] AudioWorklet not available, falling back to main thread decode"
+      );
+      // This path should rarely be taken on modern browsers
     }
   }
 

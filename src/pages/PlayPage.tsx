@@ -220,6 +220,11 @@ export default function PlayPage() {
       webrtcAudioPlayerRef.current.playPCMAudio(audioData);
     });
 
+    // Handle ADPCM audio data - decoded in AudioWorklet for better performance
+    webrtcManager.onAudioDataADPCM((audioData) => {
+      webrtcAudioPlayerRef.current.playADPCMAudio(audioData);
+    });
+
     webrtcManager.onError((error) => {
       console.error("WebRTC error:", error);
     });
