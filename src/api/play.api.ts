@@ -107,22 +107,88 @@ const getSocketUrl = () => getServerHost();
 // Stream mode type
 export type StreamMode = "websocket" | "webrtc" | "both";
 
-// Key mapping
-const KEY_MAP: Record<string, InputButton> = {
-  ArrowUp: "UP",
-  ArrowDown: "DOWN",
-  ArrowLeft: "LEFT",
-  ArrowRight: "RIGHT",
-  z: "A",
-  x: "B",
-  a: "L",
-  s: "R",
-  Enter: "START",
-  Shift: "SELECT",
+// Key mapping type
+export type KeyMappings = Record<InputButton, string>;
+
+// Default key mappings
+export const DEFAULT_KEY_MAPPINGS: KeyMappings = {
+  UP: "ArrowUp",
+  DOWN: "ArrowDown",
+  LEFT: "ArrowLeft",
+  RIGHT: "ArrowRight",
+  A: "z",
+  B: "x",
+  L: "a",
+  R: "s",
+  START: "Enter",
+  SELECT: "Shift",
 };
 
-export function keyToButton(key: string): InputButton | null {
-  return KEY_MAP[key] || null;
+// localStorage key for saved mappings
+const STORAGE_KEY = "cloudgaming_key_mappings";
+
+// Load saved key mappings from localStorage
+export function loadKeyMappings(): KeyMappings {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // Merge with defaults to ensure all buttons have mappings
+      return { ...DEFAULT_KEY_MAPPINGS, ...parsed };
+    }
+  } catch (e) {
+    console.warn("Failed to load key mappings:", e);
+  }
+  return { ...DEFAULT_KEY_MAPPINGS };
+}
+
+// Save key mappings to localStorage
+export function saveKeyMappings(mappings: KeyMappings): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(mappings));
+  } catch (e) {
+    console.warn("Failed to save key mappings:", e);
+  }
+}
+
+// Reset key mappings to defaults
+export function resetKeyMappings(): KeyMappings {
+  localStorage.removeItem(STORAGE_KEY);
+  return { ...DEFAULT_KEY_MAPPINGS };
+}
+
+// Get display name for a key
+export function getKeyDisplayName(key: string): string {
+  const keyDisplayMap: Record<string, string> = {
+    ArrowUp: "↑",
+    ArrowDown: "↓",
+    ArrowLeft: "←",
+    ArrowRight: "→",
+    Enter: "Enter",
+    Shift: "Shift",
+    Control: "Ctrl",
+    Alt: "Alt",
+    " ": "Space",
+    Escape: "Esc",
+    Tab: "Tab",
+    Backspace: "←",
+  };
+  return keyDisplayMap[key] || key.toUpperCase();
+}
+
+// Convert key event to button using custom mappings
+export function keyToButton(
+  key: string,
+  mappings?: KeyMappings
+): InputButton | null {
+  const currentMappings = mappings || loadKeyMappings();
+  // Find button that maps to this key
+  for (const [button, mappedKey] of Object.entries(currentMappings)) {
+    if (mappedKey === key) {
+      return button as InputButton;
+    }
+  }
+  return null;
 }
 
 // Session API
@@ -505,20 +571,27 @@ export class GameInputManager {
   private socketManager: GameSocketManager;
   private keyDownHandler: ((e: KeyboardEvent) => void) | null = null;
   private keyUpHandler: ((e: KeyboardEvent) => void) | null = null;
+  private keyMappings: KeyMappings;
 
   constructor(socketManager: GameSocketManager) {
     this.socketManager = socketManager;
+    this.keyMappings = loadKeyMappings();
   }
 
   setSessionId(sessionId: string | null): void {
     this.sessionId = sessionId;
   }
 
+  // Update key mappings (call when user changes settings)
+  updateKeyMappings(mappings: KeyMappings): void {
+    this.keyMappings = mappings;
+  }
+
   setupKeyboardControls(): void {
     this.keyDownHandler = (e: KeyboardEvent) => {
       if (!this.sessionId) return;
 
-      const button = keyToButton(e.key);
+      const button = keyToButton(e.key, this.keyMappings);
       if (button) {
         e.preventDefault();
         this.socketManager.sendInput(this.sessionId, button, "down");
@@ -528,7 +601,7 @@ export class GameInputManager {
     this.keyUpHandler = (e: KeyboardEvent) => {
       if (!this.sessionId) return;
 
-      const button = keyToButton(e.key);
+      const button = keyToButton(e.key, this.keyMappings);
       if (button) {
         e.preventDefault();
         this.socketManager.sendInput(this.sessionId, button, "up");

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useParams, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   createGameSession,
   startGameSession,
@@ -13,6 +13,9 @@ import {
   PlayApiError,
   type InputButton,
   type StreamMode,
+  type KeyMappings,
+  loadKeyMappings,
+  getKeyDisplayName,
 } from "@/api/play.api";
 import {
   WebRTCManager,
@@ -21,6 +24,7 @@ import {
   setStreamMode as setServerStreamMode,
 } from "@/api/webrtc.api";
 import { useQueryState } from "nuqs";
+import { ControlsConfigDialog } from "@/components/ControlsConfigDialog";
 
 // Error state interface
 interface ErrorState {
@@ -29,7 +33,6 @@ interface ErrorState {
 }
 
 export default function PlayPage() {
-  const { id } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -53,7 +56,10 @@ export default function PlayPage() {
 
   // Stream mode state
   const [streamMode, setStreamMode] = useState<StreamMode>("websocket");
-  const [webrtcConnected, setWebrtcConnected] = useState(false);
+
+  // Controls config dialog state
+  const [showControlsConfig, setShowControlsConfig] = useState(false);
+  const [keyMappings, setKeyMappings] = useState<KeyMappings>(loadKeyMappings);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameContainerRef = useRef<HTMLDivElement>(null);
@@ -214,15 +220,6 @@ export default function PlayPage() {
       webrtcAudioPlayerRef.current.playPCMAudio(audioData);
     });
 
-    webrtcManager.onConnected(() => {
-      setWebrtcConnected(true);
-      console.log("🎮 WebRTC peer connection connected!");
-    });
-
-    webrtcManager.onDisconnected(() => {
-      setWebrtcConnected(false);
-    });
-
     webrtcManager.onError((error) => {
       console.error("WebRTC error:", error);
     });
@@ -253,6 +250,12 @@ export default function PlayPage() {
     return () => inputManagerRef.current.cleanup();
   }, [sessionId]);
 
+  // Handle key mappings change
+  const handleKeyMappingsChange = useCallback((newMappings: KeyMappings) => {
+    setKeyMappings(newMappings);
+    inputManagerRef.current.updateKeyMappings(newMappings);
+  }, []);
+
   // Handle stream mode change
   const handleStreamModeChange = useCallback(
     async (newMode: StreamMode) => {
@@ -278,8 +281,7 @@ export default function PlayPage() {
             sessionId
           );
           if (webrtcSuccess) {
-            console.log("✅ WebRTC session created for mode switch");
-            setWebrtcConnected(true);
+            // setWebrtcConnected(true);
           } else {
             console.warn("WebRTC session creation failed during mode switch");
           }
@@ -1081,22 +1083,49 @@ export default function PlayPage() {
           <div className="hidden lg:block space-y-4">
             {/* Controls Reference */}
             <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl backdrop-blur-sm p-4">
-              <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                <svg
-                  className="w-4 h-4 text-purple-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <svg
+                    className="w-4 h-4 text-purple-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
+                    />
+                  </svg>
+                  CONTROLS
+                </h3>
+                <button
+                  onClick={() => setShowControlsConfig(true)}
+                  className="p-1.5 bg-purple-600/30 hover:bg-purple-600/50 rounded-lg text-purple-300 transition-colors"
+                  title="Configurer les commandes"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
-                  />
-                </svg>
-                CONTROLS
-              </h3>
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                  </svg>
+                </button>
+              </div>
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between p-2 bg-slate-800/50 rounded-lg">
@@ -1104,12 +1133,12 @@ export default function PlayPage() {
                     D-Pad
                   </span>
                   <div className="flex gap-1">
-                    {["↑", "↓", "←", "→"].map((key, i) => (
+                    {(["UP", "DOWN", "LEFT", "RIGHT"] as const).map((btn) => (
                       <kbd
-                        key={i}
+                        key={btn}
                         className="px-1.5 py-0.5 bg-slate-700 rounded text-cyan-400 text-xs font-mono"
                       >
-                        {key}
+                        {getKeyDisplayName(keyMappings[btn])}
                       </kbd>
                     ))}
                   </div>
@@ -1120,10 +1149,10 @@ export default function PlayPage() {
                   </span>
                   <div className="flex gap-1">
                     <kbd className="px-1.5 py-0.5 bg-fuchsia-600/50 rounded text-white text-xs font-mono">
-                      Z
+                      {getKeyDisplayName(keyMappings.A)}
                     </kbd>
                     <kbd className="px-1.5 py-0.5 bg-rose-600/50 rounded text-white text-xs font-mono">
-                      X
+                      {getKeyDisplayName(keyMappings.B)}
                     </kbd>
                   </div>
                 </div>
@@ -1133,20 +1162,25 @@ export default function PlayPage() {
                   </span>
                   <div className="flex gap-1">
                     <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-slate-300 text-xs font-mono">
-                      A
+                      {getKeyDisplayName(keyMappings.L)}
                     </kbd>
                     <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-slate-300 text-xs font-mono">
-                      S
+                      {getKeyDisplayName(keyMappings.R)}
                     </kbd>
                   </div>
                 </div>
                 <div className="flex items-center justify-between p-2 bg-slate-800/50 rounded-lg">
                   <span className="text-slate-400 text-xs font-mono">
-                    Start
+                    Start / Select
                   </span>
-                  <kbd className="px-1.5 py-0.5 bg-emerald-600/50 rounded text-white text-xs font-mono">
-                    Enter
-                  </kbd>
+                  <div className="flex gap-1">
+                    <kbd className="px-1.5 py-0.5 bg-emerald-600/50 rounded text-white text-xs font-mono">
+                      {getKeyDisplayName(keyMappings.START)}
+                    </kbd>
+                    <kbd className="px-1.5 py-0.5 bg-slate-600/50 rounded text-white text-xs font-mono">
+                      {getKeyDisplayName(keyMappings.SELECT)}
+                    </kbd>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1210,67 +1244,6 @@ export default function PlayPage() {
                     Low latency, experimental
                   </p>
                 </button>
-
-                {/* WebRTC Status Indicator */}
-                {(streamMode === "webrtc" || streamMode === "both") && (
-                  <div className="mt-2 p-2 bg-slate-800/30 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`w-2 h-2 rounded-full ${
-                          webrtcConnected
-                            ? "bg-green-400 animate-pulse"
-                            : "bg-yellow-400"
-                        }`}
-                      />
-                      <span className="text-[10px] font-mono text-slate-400">
-                        {webrtcConnected
-                          ? "WebRTC Connected"
-                          : "WebRTC Connecting..."}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Session Info */}
-            <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl backdrop-blur-sm p-4">
-              <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                <svg
-                  className="w-4 h-4 text-cyan-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                SESSION
-              </h3>
-
-              <div className="space-y-2 text-xs font-mono">
-                <div className="flex justify-between text-slate-400">
-                  <span>Game ID</span>
-                  <span className="text-white">{id}</span>
-                </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>ROM</span>
-                  <span className="text-white truncate max-w-[120px]">
-                    {rom.split("/").pop()?.split(".")[0]}
-                  </span>
-                </div>
-                {sessionId && (
-                  <div className="pt-2 border-t border-slate-700/50">
-                    <span className="text-slate-500 block mb-1">Session</span>
-                    <code className="text-cyan-400 text-[10px] break-all">
-                      {sessionId}
-                    </code>
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -1292,6 +1265,13 @@ export default function PlayPage() {
           </div>
         )}
       </div>
+
+      {/* Controls Configuration Dialog */}
+      <ControlsConfigDialog
+        open={showControlsConfig}
+        onOpenChange={setShowControlsConfig}
+        onMappingsChange={handleKeyMappingsChange}
+      />
     </div>
   );
 }
