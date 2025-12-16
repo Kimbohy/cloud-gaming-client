@@ -500,6 +500,58 @@ export class WebRTCManager {
     return this.dataChannel?.readyState === "open";
   }
 
+  /**
+   * Request to save the current emulator state
+   * @param gameSessionId The game session ID
+   * @param callback Called with the result containing base64 state data
+   */
+  saveState(
+    gameSessionId: string,
+    callback: (result: {
+      success: boolean;
+      stateData?: string;
+      thumbnail?: string;
+      error?: string;
+    }) => void
+  ): void {
+    console.log(
+      "[WebRTCManager] saveState called, gameSessionId:",
+      gameSessionId
+    );
+    console.log("[WebRTCManager] socket connected:", this.socket?.connected);
+
+    if (!this.socket?.connected) {
+      console.error("[WebRTCManager] Socket not connected");
+      callback({ success: false, error: "Not connected" });
+      return;
+    }
+
+    console.log("[WebRTCManager] Emitting save-state event...");
+    this.socket.emit("save-state", { gameSessionId }, (response: any) => {
+      console.log("[WebRTCManager] save-state response:", response);
+      callback(response);
+    });
+  }
+
+  /**
+   * Request to load a saved emulator state
+   * @param gameSessionId The game session ID
+   * @param stateData Base64 encoded state data
+   * @param callback Called with the result
+   */
+  loadState(
+    gameSessionId: string,
+    stateData: string,
+    callback: (result: { success: boolean; error?: string }) => void
+  ): void {
+    if (!this.socket?.connected) {
+      callback({ success: false, error: "Not connected" });
+      return;
+    }
+
+    this.socket.emit("load-state", { gameSessionId, stateData }, callback);
+  }
+
   async closeSession(): Promise<void> {
     if (this.socket?.connected && this.webrtcSessionId) {
       return new Promise((resolve) => {
