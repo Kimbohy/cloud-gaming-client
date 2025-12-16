@@ -42,7 +42,7 @@ const buttonVariants = cva(
           "border-secondary bg-secondary text-secondary-foreground hover:bg-secondary/90 data-pressed:bg-secondary/90",
       },
     },
-  },
+  }
 );
 
 interface ButtonProps extends useRender.ComponentProps<"button"> {

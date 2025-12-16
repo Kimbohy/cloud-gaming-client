@@ -3,6 +3,7 @@ import {
   Dialog,
   DialogContent,
   DialogHeader,
+  DialogPanel,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -199,173 +200,196 @@ export function SaveStatesModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Save className="w-5 h-5" />
-            Save States - {romName}
+      <DialogContent className="max-w-3xl max-h-[82vh] overflow-y-auto border border-slate-800/70 bg-slate-950/80 backdrop-blur-xl text-slate-100">
+        <DialogHeader className="pb-2">
+          <DialogTitle className="flex items-center gap-2 text-lg font-semibold text-slate-50">
+            <Save className="w-5 h-5 text-amber-400" />
+            Save States · {romName}
           </DialogTitle>
+          <p className="text-xs text-slate-400">
+            Store and reload snapshots for this session.
+          </p>
         </DialogHeader>
-
-        <div className="space-y-4">
-          {/* Quick Save Button */}
-          <Button
-            onClick={handleQuickSave}
-            disabled={actionLoading !== null}
-            className="w-full"
-          >
-            {actionLoading?.startsWith("save-") ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Save className="w-4 h-4 mr-2" />
-            )}
-            Quick Save (Slot {getNextAvailableSlot() + 1})
-          </Button>
-
-          {/* Slots Grid */}
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-8 h-8 animate-spin" />
+        <DialogPanel>
+          <div className="space-y-4">
+            {/* Quick Save */}
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 shadow-[0_10px_40px_-24px] shadow-amber-500/40">
+              <div>
+                <div className="text-sm font-semibold text-amber-100">
+                  Quick Save
+                </div>
+                <div className="text-xs text-amber-200/80">
+                  Will use next free slot (Slot {getNextAvailableSlot() + 1}).
+                </div>
+              </div>
+              <Button
+                onClick={handleQuickSave}
+                disabled={actionLoading !== null}
+                className="min-w-[140px] bg-amber-500 text-slate-950 hover:bg-amber-400"
+              >
+                {actionLoading?.startsWith("save-") ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4 mr-2" />
+                )}
+                Quick Save
+              </Button>
             </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {slots.map(({ slotNumber, state }) => (
-                <div
-                  key={slotNumber}
-                  className={`border rounded-lg p-3 ${
-                    state ? "bg-muted/50" : "bg-muted/20 border-dashed"
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    {/* Thumbnail */}
-                    <div className="w-16 h-16 bg-black rounded shrink-0 overflow-hidden">
-                      {state && thumbnails[state.id] ? (
-                        <img
-                          src={thumbnails[state.id]}
-                          alt="Save thumbnail"
-                          className="w-full h-full object-contain"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">
-                          {state ? "No preview" : "Empty"}
-                        </div>
-                      )}
-                    </div>
 
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      {editingId === state?.id ? (
-                        <div className="flex items-center gap-1">
-                          <Input
-                            value={editName}
-                            onChange={(e) => setEditName(e.target.value)}
-                            className="h-7 text-sm"
-                            autoFocus
-                          />
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-7 w-7"
-                            onClick={handleConfirmRename}
-                          >
-                            <Check className="w-3 h-3" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-7 w-7"
-                            onClick={handleCancelRename}
-                          >
-                            <X className="w-3 h-3" />
-                          </Button>
+            {/* Slots Grid */}
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-amber-400" />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                {slots.map(({ slotNumber, state }) => {
+                  const isEditing = editingId === state?.id;
+                  const isBusy = Boolean(actionLoading);
+                  return (
+                    <div
+                      key={slotNumber}
+                      className={`group rounded-xl border border-slate-800/70 bg-slate-900/60 p-3 shadow-[0_10px_30px_-25px] shadow-black/80 transition-colors hover:border-amber-500/50 ${
+                        state ? "" : "border-dashed"
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        {/* Thumbnail */}
+                        <div className="w-20 h-20 bg-slate-950 rounded-lg shrink-0 overflow-hidden border border-slate-800">
+                          {state && thumbnails[state.id] ? (
+                            <img
+                              src={thumbnails[state.id]}
+                              alt="Save thumbnail"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-slate-500 text-[11px]">
+                              {state ? "No preview" : "Empty"}
+                            </div>
+                          )}
                         </div>
-                      ) : (
-                        <div className="font-medium text-sm truncate">
-                          {state?.name || `Slot ${slotNumber + 1}`}
-                        </div>
-                      )}
 
-                      {state && (
-                        <div className="text-xs text-muted-foreground mt-1">
-                          {formatDate(state.lastUsedAt)}
-                        </div>
-                      )}
+                        {/* Info */}
+                        <div className="flex-1 min-w-0 space-y-1">
+                          {isEditing ? (
+                            <div className="flex items-center gap-1.5">
+                              <Input
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                className="h-8 text-sm dark"
+                                autoFocus
+                              />
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-emerald-400"
+                                onClick={handleConfirmRename}
+                              >
+                                <Check className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-slate-300"
+                                onClick={handleCancelRename}
+                              >
+                                <X className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 text-sm font-semibold text-slate-50">
+                              <span className="inline-flex h-5 items-center rounded-full bg-slate-800 px-2 text-[11px] font-mono text-slate-300">
+                                Slot {slotNumber + 1}
+                              </span>
+                              <span className="truncate text-slate-100">
+                                {state?.name || "Empty Slot"}
+                              </span>
+                            </div>
+                          )}
 
-                      {/* Actions */}
-                      <div className="flex items-center gap-1 mt-2">
-                        {state ? (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              className="h-7 text-xs"
-                              onClick={() => handleLoadState(state)}
-                              disabled={actionLoading !== null}
-                            >
-                              {actionLoading === `load-${state.id}` ? (
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                              ) : (
-                                <Download className="w-3 h-3 mr-1" />
-                              )}
-                              Load
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs"
-                              onClick={() => handleSaveToSlot(slotNumber)}
-                              disabled={actionLoading !== null}
-                            >
-                              <Save className="w-3 h-3 mr-1" />
-                              Overwrite
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7"
-                              onClick={() => handleStartRename(state)}
-                              disabled={actionLoading !== null}
-                            >
-                              <Edit2 className="w-3 h-3" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7 text-destructive"
-                              onClick={() => handleDeleteState(state)}
-                              disabled={actionLoading !== null}
-                            >
-                              {actionLoading === `delete-${state.id}` ? (
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                              ) : (
-                                <Trash2 className="w-3 h-3" />
-                              )}
-                            </Button>
-                          </>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-xs"
-                            onClick={() => handleSaveToSlot(slotNumber)}
-                            disabled={actionLoading !== null}
-                          >
-                            {actionLoading === `save-${slotNumber}` ? (
-                              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                          <div className="text-[11px] text-slate-400">
+                            {state
+                              ? formatDate(state.lastUsedAt)
+                              : "No save yet"}
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex items-center gap-2 pt-1">
+                            {state ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  className="h-8 text-xs bg-slate-800 text-slate-100 hover:bg-slate-700"
+                                  onClick={() => handleLoadState(state)}
+                                  disabled={isBusy}
+                                >
+                                  {actionLoading === `load-${state.id}` ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Download className="w-3.5 h-3.5 mr-1" />
+                                  )}
+                                  Load
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 text-xs border-slate-700 text-slate-100 hover:border-amber-500/70"
+                                  onClick={() => handleSaveToSlot(slotNumber)}
+                                  disabled={isBusy}
+                                >
+                                  <Save className="w-3.5 h-3.5 mr-1" />
+                                  Overwrite
+                                </Button>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-slate-300"
+                                  onClick={() => handleStartRename(state)}
+                                  disabled={isBusy}
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </Button>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-rose-400"
+                                  onClick={() => handleDeleteState(state)}
+                                  disabled={isBusy}
+                                >
+                                  {actionLoading === `delete-${state.id}` ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  )}
+                                </Button>
+                              </>
                             ) : (
-                              <Save className="w-3 h-3 mr-1" />
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 text-xs border-slate-700 text-slate-200 hover:border-amber-500/70"
+                                onClick={() => handleSaveToSlot(slotNumber)}
+                                disabled={isBusy}
+                              >
+                                {actionLoading === `save-${slotNumber}` ? (
+                                  <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                                ) : (
+                                  <Save className="w-3.5 h-3.5 mr-1" />
+                                )}
+                                Save Here
+                              </Button>
                             )}
-                            Save Here
-                          </Button>
-                        )}
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </DialogPanel>
       </DialogContent>
     </Dialog>
   );
