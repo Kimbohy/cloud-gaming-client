@@ -1,11 +1,11 @@
 import { authClient } from "../lib/auth-client";
 
-const getServerHost = () => {
+const getApiBase = () => {
   if (import.meta.env.VITE_SERVER_URL) {
-    return import.meta.env.VITE_SERVER_URL;
+    return import.meta.env.VITE_SERVER_URL + "/api";
   }
   const hostname = window.location.hostname;
-  return `http://${hostname}:3000`;
+  return `http://${hostname}:3000/api`;
 };
 
 export interface SaveStateMetadata {
@@ -75,17 +75,14 @@ function invalidateCache(): void {
 }
 
 /**
- * Get auth headers for API requests
+ * Get userId from auth client
  */
-function getAuthHeaders(): Record<string, string> {
-  const token = authClient.getAccessToken();
-  if (!token) {
+function getUserId(): string {
+  const user = authClient.getUser();
+  if (!user) {
     throw new Error("Not authenticated");
   }
-  return {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-  };
+  return user.id;
 }
 
 /**
@@ -100,13 +97,14 @@ export async function listSaveStates(
     return cached;
   }
 
-  const headers = getAuthHeaders();
-  const url = new URL(`${getServerHost()}/save-states`);
+  const userId = getUserId();
+  const url = new URL(`${getApiBase()}/save-states`);
+  url.searchParams.set("userId", userId);
   if (romId) {
     url.searchParams.set("romId", romId);
   }
 
-  const response = await fetch(url.toString(), { headers });
+  const response = await fetch(url.toString());
   if (!response.ok) {
     throw new Error(`Failed to list save states: ${response.statusText}`);
   }
@@ -131,9 +129,10 @@ export async function saveState(params: {
   stateData: ArrayBuffer;
   thumbnail?: ArrayBuffer;
 }): Promise<SaveStateMetadata> {
-  const headers = getAuthHeaders();
+  const userId = getUserId();
 
   const body = {
+    userId,
     romId: params.romId,
     slotNumber: params.slotNumber,
     name: params.name,
@@ -143,9 +142,9 @@ export async function saveState(params: {
       : undefined,
   };
 
-  const response = await fetch(`${getServerHost()}/save-states`, {
+  const response = await fetch(`${getApiBase()}/save-states`, {
     method: "POST",
-    headers,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 
@@ -164,13 +163,13 @@ export async function loadStateBySlot(
   romId: string,
   slotNumber: number
 ): Promise<ArrayBuffer> {
-  const headers = getAuthHeaders();
-  delete (headers as Record<string, string>)["Content-Type"];
-
-  const response = await fetch(
-    `${getServerHost()}/save-states/${romId}/slot/${slotNumber}`,
-    { headers }
+  const userId = getUserId();
+  const url = new URL(
+    `${getApiBase()}/save-states/${romId}/slot/${slotNumber}`
   );
+  url.searchParams.set("userId", userId);
+
+  const response = await fetch(url.toString());
 
   if (!response.ok) {
     throw new Error(`Failed to load save state: ${response.statusText}`);
@@ -183,12 +182,11 @@ export async function loadStateBySlot(
  * Load a save state by ID
  */
 export async function loadStateById(id: string): Promise<ArrayBuffer> {
-  const headers = getAuthHeaders();
-  delete (headers as Record<string, string>)["Content-Type"];
+  const userId = getUserId();
+  const url = new URL(`${getApiBase()}/save-states/${id}/data`);
+  url.searchParams.set("userId", userId);
 
-  const response = await fetch(`${getServerHost()}/save-states/${id}/data`, {
-    headers,
-  });
+  const response = await fetch(url.toString());
 
   if (!response.ok) {
     throw new Error(`Failed to load save state: ${response.statusText}`);
@@ -201,13 +199,11 @@ export async function loadStateById(id: string): Promise<ArrayBuffer> {
  * Get thumbnail for a save state
  */
 export async function getThumbnail(id: string): Promise<string | null> {
-  const headers = getAuthHeaders();
-  delete (headers as Record<string, string>)["Content-Type"];
+  const userId = getUserId();
+  const url = new URL(`${getApiBase()}/save-states/${id}/thumbnail`);
+  url.searchParams.set("userId", userId);
 
-  const response = await fetch(
-    `${getServerHost()}/save-states/${id}/thumbnail`,
-    { headers }
-  );
+  const response = await fetch(url.toString());
 
   if (response.status === 404) {
     return null;
@@ -225,12 +221,12 @@ export async function getThumbnail(id: string): Promise<string | null> {
  * Rename a save state
  */
 export async function renameState(id: string, name: string): Promise<void> {
-  const headers = getAuthHeaders();
+  const userId = getUserId();
 
-  const response = await fetch(`${getServerHost()}/save-states/${id}`, {
+  const response = await fetch(`${getApiBase()}/save-states/${id}`, {
     method: "PATCH",
-    headers,
-    body: JSON.stringify({ name }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId, name }),
   });
 
   if (!response.ok) {
@@ -244,11 +240,12 @@ export async function renameState(id: string, name: string): Promise<void> {
  * Delete a save state by ID
  */
 export async function deleteStateById(id: string): Promise<void> {
-  const headers = getAuthHeaders();
+  const userId = getUserId();
+  const url = new URL(`${getApiBase()}/save-states/${id}`);
+  url.searchParams.set("userId", userId);
 
-  const response = await fetch(`${getServerHost()}/save-states/${id}`, {
+  const response = await fetch(url.toString(), {
     method: "DELETE",
-    headers,
   });
 
   if (!response.ok) {
@@ -265,15 +262,15 @@ export async function deleteStateBySlot(
   romId: string,
   slotNumber: number
 ): Promise<void> {
-  const headers = getAuthHeaders();
-
-  const response = await fetch(
-    `${getServerHost()}/save-states/${romId}/slot/${slotNumber}`,
-    {
-      method: "DELETE",
-      headers,
-    }
+  const userId = getUserId();
+  const url = new URL(
+    `${getApiBase()}/save-states/${romId}/slot/${slotNumber}`
   );
+  url.searchParams.set("userId", userId);
+
+  const response = await fetch(url.toString(), {
+    method: "DELETE",
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to delete save state: ${response.statusText}`);

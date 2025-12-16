@@ -514,12 +514,23 @@ export class WebRTCManager {
       error?: string;
     }) => void
   ): void {
+    console.log(
+      "[WebRTCManager] saveState called, gameSessionId:",
+      gameSessionId
+    );
+    console.log("[WebRTCManager] socket connected:", this.socket?.connected);
+
     if (!this.socket?.connected) {
+      console.error("[WebRTCManager] Socket not connected");
       callback({ success: false, error: "Not connected" });
       return;
     }
 
-    this.socket.emit("save-state", { gameSessionId }, callback);
+    console.log("[WebRTCManager] Emitting save-state event...");
+    this.socket.emit("save-state", { gameSessionId }, (response: any) => {
+      console.log("[WebRTCManager] save-state response:", response);
+      callback(response);
+    });
   }
 
   /**

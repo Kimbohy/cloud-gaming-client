@@ -23,7 +23,6 @@ import {
   WebRTCAudioPlayer,
   setStreamMode as setServerStreamMode,
 } from "@/api/webrtc.api";
-import { base64ToArrayBuffer } from "@/api/saveStates.api";
 import { useQueryState } from "nuqs";
 import { ControlsConfigDialog } from "@/components/ControlsConfigDialog";
 import { SaveStatesModal } from "@/components/SaveStatesModal";
@@ -266,10 +265,19 @@ export default function PlayPage() {
     stateData: string;
     thumbnail: string | null;
   } | null> => {
-    if (!sessionId) return null;
+    console.log("[PlayPage] handleSaveState called, sessionId:", sessionId);
+    if (!sessionId) {
+      console.error("[PlayPage] No sessionId");
+      return null;
+    }
+
+    const isConnected = webrtcManagerRef.current.isSocketConnected();
+    console.log("[PlayPage] Socket connected:", isConnected);
 
     return new Promise((resolve) => {
+      console.log("[PlayPage] Calling webrtcManager.saveState...");
       webrtcManagerRef.current.saveState(sessionId, (result) => {
+        console.log("[PlayPage] saveState callback result:", result);
         if (result.success && result.stateData) {
           resolve({
             stateData: result.stateData,
@@ -288,9 +296,7 @@ export default function PlayPage() {
     async (stateData: ArrayBuffer): Promise<boolean> => {
       if (!sessionId) return false;
 
-      const base64 = btoa(
-        String.fromCharCode(...new Uint8Array(stateData))
-      );
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(stateData)));
 
       return new Promise((resolve) => {
         webrtcManagerRef.current.loadState(sessionId, base64, (result) => {
@@ -993,32 +999,6 @@ export default function PlayPage() {
                       <span className="hidden md:inline">START</span>
                     </Button>
 
-                    {/* Save/Load Button */}
-                    <Button
-                      onClick={() => setShowSaveStatesModal(true)}
-                      disabled={!sessionId || !isPlaying}
-                      size="sm"
-                      className={`bg-amber-600 hover:bg-amber-500 text-white font-bold rounded disabled:opacity-40 ${
-                        isMobile ? "px-1.5 py-1 h-6" : "px-3 md:px-4 py-2"
-                      }`}
-                      title="Save / Load State"
-                    >
-                      <svg
-                        className={isMobile ? "w-3 h-3" : "w-4 h-4 md:mr-2"}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
-                        />
-                      </svg>
-                      <span className="hidden md:inline">SAVE</span>
-                    </Button>
-
                     <Button
                       onClick={stopEmulation}
                       disabled={!sessionId}
@@ -1313,6 +1293,75 @@ export default function PlayPage() {
                   </div>
                   <p className="text-[10px] text-slate-500 mt-1 text-left">
                     Low latency, experimental
+                  </p>
+                </button>
+              </div>
+            </div>
+
+            {/* Save States */}
+            <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl backdrop-blur-sm p-4">
+              <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                <svg
+                  className="w-4 h-4 text-amber-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                  />
+                </svg>
+                SAVE STATES
+              </h3>
+
+              <div className="space-y-2">
+                <button
+                  onClick={() => setShowSaveStatesModal(true)}
+                  disabled={!sessionId || !isPlaying}
+                  className={`w-full p-2 rounded-lg text-xs font-mono transition-all ${
+                    sessionId && isPlaying
+                      ? "bg-amber-600/50 text-amber-300 border border-amber-500/50 hover:bg-amber-600/70"
+                      : "bg-slate-800/50 text-slate-500 border border-slate-700/50 cursor-not-allowed"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                        />
+                      </svg>
+                      <span>Save / Load</span>
+                    </div>
+                    <svg
+                      className="w-4 h-4 text-slate-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1 text-left">
+                    {sessionId && isPlaying
+                      ? "Manage save states"
+                      : "Start game to use"}
                   </p>
                 </button>
               </div>
