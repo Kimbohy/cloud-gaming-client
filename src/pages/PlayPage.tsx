@@ -42,6 +42,7 @@ export default function PlayPage() {
     rom: string;
     desc: string;
   };
+  const romId = location.pathname.split("/play/")[1];
 
   const [name, setName] = useQueryState("name");
   const [rom, setRom] = useQueryState("rom", { defaultValue: "" });
@@ -260,88 +261,6 @@ export default function PlayPage() {
     inputManagerRef.current.updateKeyMappings(newMappings);
   }, []);
 
-  // Handle save state request (called from SaveStatesModal)
-  const handleSaveState = useCallback(async (): Promise<{
-    stateData: string;
-    thumbnail: string | null;
-  } | null> => {
-    console.log("[PlayPage] handleSaveState called, sessionId:", sessionId);
-    if (!sessionId) {
-      console.error("[PlayPage] No sessionId");
-      return null;
-    }
-
-    const isConnected = webrtcManagerRef.current.isSocketConnected();
-    console.log("[PlayPage] Socket connected:", isConnected);
-
-    return new Promise((resolve) => {
-      console.log("[PlayPage] Calling webrtcManager.saveState...");
-      webrtcManagerRef.current.saveState(sessionId, (result) => {
-        console.log("[PlayPage] saveState callback result:", result);
-        if (result.success && result.stateData) {
-          resolve({
-            stateData: result.stateData,
-            thumbnail: result.thumbnail ?? null,
-          });
-        } else {
-          console.error("Failed to save state:", result.error);
-          resolve(null);
-        }
-      });
-    });
-  }, [sessionId]);
-
-  // Handle load state request (called from SaveStatesModal)
-  const handleLoadState = useCallback(
-    async (stateData: ArrayBuffer): Promise<boolean> => {
-      if (!sessionId) return false;
-
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(stateData)));
-
-      return new Promise((resolve) => {
-        webrtcManagerRef.current.loadState(sessionId, base64, (result) => {
-          resolve(result.success);
-        });
-      });
-    },
-    [sessionId]
-  );
-
-  // Handle stream mode change
-  const handleStreamModeChange = useCallback(
-    async (newMode: StreamMode) => {
-      setStreamMode(newMode);
-      if (sessionId) {
-        // Update server stream mode
-        const result = await setServerStreamMode(sessionId, newMode);
-        if (!result.success) {
-          console.error("Failed to change stream mode:", result.error);
-          return;
-        }
-
-        // Create WebRTC session if switching to webrtc mode
-        if (newMode === "webrtc" || newMode === "both") {
-          // Make sure WebRTC signaling socket is connected
-          if (!webrtcManagerRef.current.isSocketConnected()) {
-            webrtcManagerRef.current.connect();
-            // Wait a bit for the socket to connect
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          }
-
-          const webrtcSuccess = await webrtcManagerRef.current.createSession(
-            sessionId
-          );
-          if (webrtcSuccess) {
-            // setWebrtcConnected(true);
-          } else {
-            console.warn("WebRTC session creation failed during mode switch");
-          }
-        }
-      }
-    },
-    [sessionId]
-  );
-
   const createSession = async () => {
     try {
       setError(null);
@@ -412,6 +331,111 @@ export default function PlayPage() {
       setStatus("Error");
     }
   };
+
+  // Ensure a session is created, WebRTC is ready, and the game is running before save/load
+  const ensureSessionReady = useCallback(async (): Promise<string | null> => {
+    let sid = sessionId;
+
+    if (!sid) {
+      sid = await createSession();
+      if (!sid) return null;
+    }
+
+    if (!webrtcManagerRef.current.isSocketConnected()) {
+      webrtcManagerRef.current.connect();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    // Create/refresh WebRTC session to make sure save/load channels exist
+    await webrtcManagerRef.current.createSession(sid);
+
+    if (status !== "Playing") {
+      await startSession(sid);
+    }
+
+    return sid;
+  }, [sessionId, status, createSession, startSession]);
+
+  // Handle save state request (called from SaveStatesModal)
+  const handleSaveState = useCallback(async (): Promise<{
+    stateData: string;
+    thumbnail: string | null;
+  } | null> => {
+    console.log("[PlayPage] handleSaveState called, sessionId:", sessionId);
+    const sid = await ensureSessionReady();
+    if (!sid) {
+      console.error("[PlayPage] No session available for save");
+      return null;
+    }
+
+    return new Promise((resolve) => {
+      console.log("[PlayPage] Calling webrtcManager.saveState...");
+      webrtcManagerRef.current.saveState(sid, (result) => {
+        console.log("[PlayPage] saveState callback result:", result);
+        if (result.success && result.stateData) {
+          resolve({
+            stateData: result.stateData,
+            thumbnail: result.thumbnail ?? null,
+          });
+        } else {
+          console.error("Failed to save state:", result.error);
+          resolve(null);
+        }
+      });
+    });
+  }, [sessionId]);
+
+  // Handle load state request (called from SaveStatesModal)
+  const handleLoadState = useCallback(
+    async (stateData: ArrayBuffer): Promise<boolean> => {
+      const sid = await ensureSessionReady();
+      if (!sid) return false;
+
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(stateData)));
+
+      return new Promise((resolve) => {
+        webrtcManagerRef.current.loadState(sid, base64, (result) => {
+          resolve(result.success);
+        });
+      });
+    },
+    [ensureSessionReady]
+  );
+
+  // Handle stream mode change
+  const handleStreamModeChange = useCallback(
+    async (newMode: StreamMode) => {
+      setStreamMode(newMode);
+      if (sessionId) {
+        // Update server stream mode
+        const result = await setServerStreamMode(sessionId, newMode);
+        if (!result.success) {
+          console.error("Failed to change stream mode:", result.error);
+          return;
+        }
+
+        // Create WebRTC session if switching to webrtc mode
+        if (newMode === "webrtc" || newMode === "both") {
+          // Make sure WebRTC signaling socket is connected
+          if (!webrtcManagerRef.current.isSocketConnected()) {
+            webrtcManagerRef.current.connect();
+            // Wait a bit for the socket to connect
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+
+          const webrtcSuccess = await webrtcManagerRef.current.createSession(
+            sessionId
+          );
+          if (webrtcSuccess) {
+            // setWebrtcConnected(true);
+          } else {
+            console.warn("WebRTC session creation failed during mode switch");
+          }
+        }
+      }
+    },
+    [sessionId]
+  );
 
   const stopEmulation = async () => {
     if (!sessionId) return;
@@ -1320,11 +1344,11 @@ export default function PlayPage() {
               <div className="space-y-2">
                 <button
                   onClick={() => setShowSaveStatesModal(true)}
-                  disabled={!sessionId || !isPlaying}
-                  className={`w-full p-2 rounded-lg text-xs font-mono transition-all ${
-                    sessionId && isPlaying
-                      ? "bg-amber-600/50 text-amber-300 border border-amber-500/50 hover:bg-amber-600/70"
-                      : "bg-slate-800/50 text-slate-500 border border-slate-700/50 cursor-not-allowed"
+                  disabled={!rom}
+                  className={`group w-full p-2 rounded-lg text-xs font-mono transition-all duration-300 ${
+                    rom
+                      ? "bg-amber-600/50 text-amber-300 border border-amber-500/50 hover:bg-amber-600/80 hover:border-amber-400 hover:shadow-[0_0_20px_rgba(251,146,60,0.4)]"
+                      : "bg-slate-800/50 text-white border border-slate-700/50 cursor-not-allowed"
                   }`}
                 >
                   <div className="flex items-center justify-between">
@@ -1345,7 +1369,7 @@ export default function PlayPage() {
                       <span>Save / Load</span>
                     </div>
                     <svg
-                      className="w-4 h-4 text-slate-400"
+                      className="w-4 h-4 text-white transition-transform duration-300 group-hover:translate-x-1"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -1358,10 +1382,8 @@ export default function PlayPage() {
                       />
                     </svg>
                   </div>
-                  <p className="text-[10px] text-slate-500 mt-1 text-left">
-                    {sessionId && isPlaying
-                      ? "Manage save states"
-                      : "Start game to use"}
+                  <p className="text-[10px] text-white mt-1 text-left">
+                    Load or save anytime for this ROM.
                   </p>
                 </button>
               </div>
@@ -1394,11 +1416,11 @@ export default function PlayPage() {
       />
 
       {/* Save States Modal */}
-      {sessionId && rom && (
+      {rom && (
         <SaveStatesModal
           isOpen={showSaveStatesModal}
           onClose={() => setShowSaveStatesModal(false)}
-          romId={rom}
+          romId={romId}
           romName={name || gameData?.name || "Game"}
           onSave={handleSaveState}
           onLoad={handleLoadState}

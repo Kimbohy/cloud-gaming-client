@@ -281,7 +281,7 @@ export function SaveStatesModal({
                               />
                               <Button
                                 size="icon"
-                                variant="ghost"
+                                variant="secondary"
                                 className="h-8 w-8 text-emerald-400"
                                 onClick={handleConfirmRename}
                               >
@@ -289,7 +289,7 @@ export function SaveStatesModal({
                               </Button>
                               <Button
                                 size="icon"
-                                variant="ghost"
+                                variant="secondary"
                                 className="h-8 w-8 text-slate-300"
                                 onClick={handleCancelRename}
                               >
@@ -333,7 +333,7 @@ export function SaveStatesModal({
                                 </Button>
                                 <Button
                                   size="sm"
-                                  variant="ghost"
+                                  variant="secondary"
                                   className="h-8 text-xs border-slate-700 text-slate-100 hover:border-amber-500/70"
                                   onClick={() => handleSaveToSlot(slotNumber)}
                                   disabled={isBusy}
@@ -343,7 +343,7 @@ export function SaveStatesModal({
                                 </Button>
                                 <Button
                                   size="icon"
-                                  variant="ghost"
+                                  variant="secondary"
                                   className="h-8 w-8 text-slate-300"
                                   onClick={() => handleStartRename(state)}
                                   disabled={isBusy}
@@ -352,7 +352,7 @@ export function SaveStatesModal({
                                 </Button>
                                 <Button
                                   size="icon"
-                                  variant="ghost"
+                                  variant="secondary"
                                   className="h-8 w-8 text-rose-400"
                                   onClick={() => handleDeleteState(state)}
                                   disabled={isBusy}
@@ -367,7 +367,7 @@ export function SaveStatesModal({
                             ) : (
                               <Button
                                 size="sm"
-                                variant="outline"
+                                variant="secondary"
                                 className="h-8 text-xs border-slate-700 text-slate-200 hover:border-amber-500/70"
                                 onClick={() => handleSaveToSlot(slotNumber)}
                                 disabled={isBusy}
