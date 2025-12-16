@@ -329,6 +329,13 @@ export class WebRTCManager {
         const buffer = event.data as ArrayBuffer;
         const dataView = new DataView(buffer);
 
+        // Debug: log occasionally
+        if (Math.random() < 0.01) {
+          console.log(
+            `[WebRTC] Audio data received: ${buffer.byteLength} bytes`
+          );
+        }
+
         // Parse header (16 bytes)
         // [SampleRate(4)][Channels(4)][Format(4)][Length(4)]
         const sampleRate = dataView.getUint32(0, true);
