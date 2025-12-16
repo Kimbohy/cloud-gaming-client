@@ -27,7 +27,6 @@ import { useQueryState } from "nuqs";
 import { ControlsConfigDialog } from "@/components/ControlsConfigDialog";
 import { SaveStatesModal } from "@/components/SaveStatesModal";
 
-// Error state interface
 interface ErrorState {
   message: string;
   isNetworkError: boolean;
@@ -56,14 +55,11 @@ export default function PlayPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
 
-  // Stream mode state
   const [streamMode, setStreamMode] = useState<StreamMode>("websocket");
 
-  // Controls config dialog state
   const [showControlsConfig, setShowControlsConfig] = useState(false);
   const [keyMappings, setKeyMappings] = useState<KeyMappings>(loadKeyMappings);
 
-  // Save states modal state
   const [showSaveStatesModal, setShowSaveStatesModal] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -75,7 +71,6 @@ export default function PlayPage() {
     new GameInputManager(socketManagerRef.current)
   );
 
-  // WebRTC refs
   const webrtcManagerRef = useRef<WebRTCManager>(new WebRTCManager());
   const webrtcVideoRendererRef = useRef<WebRTCVideoRenderer>(
     new WebRTCVideoRenderer()
@@ -84,37 +79,29 @@ export default function PlayPage() {
     new WebRTCAudioPlayer()
   );
 
-  // Resume audio on user interaction (required by browsers)
   const resumeAudio = useCallback(() => {
     audioManagerRef.current.resume?.();
     webrtcAudioPlayerRef.current.resume();
   }, []);
 
-  // Send button input directly to socket or WebRTC
   const sendInput = useCallback(
     (button: InputButton, state: "down" | "up") => {
       if (!sessionId) return;
 
-      // Resume audio on any user input
       resumeAudio();
 
-      // Use WebRTC data channel if available for lowest latency
       if (
         streamMode === "webrtc" &&
         webrtcManagerRef.current.isDataChannelReady()
       ) {
-        console.log(`[Input] Sending via WebRTC: ${button} ${state}`);
         webrtcManagerRef.current.sendInput(button, state);
       } else {
-        // Fallback to WebSocket for input (always available)
-        console.log(`[Input] Sending via WebSocket: ${button} ${state}`);
         socketManagerRef.current.sendInput(sessionId, button, state);
       }
     },
     [sessionId, streamMode, resumeAudio]
   );
 
-  // Detect mobile device
   useEffect(() => {
     const checkDevice = () => {
       const mobile = window.innerWidth < 1024 || "ontouchstart" in window;
@@ -126,7 +113,6 @@ export default function PlayPage() {
     return () => window.removeEventListener("resize", checkDevice);
   }, []);
 
-  // Fullscreen toggle with landscape lock
   const toggleFullscreen = useCallback(async () => {
     if (!gameContainerRef.current) return;
 
@@ -134,12 +120,9 @@ export default function PlayPage() {
       if (!document.fullscreenElement) {
         await gameContainerRef.current.requestFullscreen();
         setIsFullscreen(true);
-        // Try to lock orientation to landscape
         try {
           await (screen.orientation as any).lock?.("landscape");
-        } catch {
-          // Orientation lock not supported
-        }
+        } catch {}
       } else {
         await document.exitFullscreen();
         setIsFullscreen(false);
@@ -149,7 +132,6 @@ export default function PlayPage() {
     }
   }, []);
 
-  // Listen for fullscreen changes
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
@@ -167,9 +149,7 @@ export default function PlayPage() {
     }
   }, [gameData]);
 
-  // Initialize managers based on stream mode
   useEffect(() => {
-    // Always initialize WebSocket for fallback
     audioManagerRef.current.initialize();
     if (canvasRef.current) {
       canvasManagerRef.current.initialize(canvasRef.current);
@@ -185,7 +165,6 @@ export default function PlayPage() {
 
     socketManager.onDisconnect(() => setConnected(false));
 
-    // Only handle WebSocket frames if in websocket mode
     socketManager.onFrame((data) => {
       if (streamMode === "websocket" || streamMode === "both") {
         canvasManagerRef.current.renderFrame(data);
@@ -197,7 +176,6 @@ export default function PlayPage() {
       }
     });
 
-    // Always initialize WebRTC components (so they're ready for mode switching)
     webrtcAudioPlayerRef.current.initialize();
     if (canvasRef.current) {
       webrtcVideoRendererRef.current.initialize(canvasRef.current);
@@ -205,22 +183,17 @@ export default function PlayPage() {
 
     const webrtcManager = webrtcManagerRef.current;
 
-    // Always connect the WebRTC signaling socket so it's ready
     webrtcManager.connect();
 
     webrtcManager.onVideoTrack((stream) => {
-      console.log("📹 Video track received");
       webrtcVideoRendererRef.current.setVideoStream(stream);
     });
 
     webrtcManager.onAudioTrack((stream) => {
-      console.log("🔊 Audio track received");
       webrtcAudioPlayerRef.current.setAudioStream(stream);
-      // Resume audio playback
       webrtcAudioPlayerRef.current.resume();
     });
 
-    // Handle audio data from DataChannel (fallback/primary method)
     webrtcManager.onAudioData((audioData) => {
       webrtcAudioPlayerRef.current.playPCMAudio(audioData);
     });
@@ -237,9 +210,8 @@ export default function PlayPage() {
       webrtcVideoRendererRef.current.cleanup();
       webrtcAudioPlayerRef.current.cleanup();
     };
-  }, []); // Only run once on mount, not on streamMode changes
+  }, []);
 
-  // Re-initialize canvas when fullscreen state changes (canvas element changes)
   useEffect(() => {
     if (canvasRef.current) {
       canvasManagerRef.current.initialize(canvasRef.current);
@@ -255,7 +227,6 @@ export default function PlayPage() {
     return () => inputManagerRef.current.cleanup();
   }, [sessionId]);
 
-  // Handle key mappings change
   const handleKeyMappingsChange = useCallback((newMappings: KeyMappings) => {
     setKeyMappings(newMappings);
     inputManagerRef.current.updateKeyMappings(newMappings);
@@ -269,10 +240,8 @@ export default function PlayPage() {
       setSessionId(data.sessionId);
       setStatus("Created");
 
-      // Subscribe to WebSocket session
       socketManagerRef.current.subscribeToSession(data.sessionId);
 
-      // Create WebRTC session if in webrtc or both mode
       if (streamMode === "webrtc" || streamMode === "both") {
         const webrtcSuccess = await webrtcManagerRef.current.createSession(
           data.sessionId
@@ -332,7 +301,6 @@ export default function PlayPage() {
     }
   };
 
-  // Ensure a session is created, WebRTC is ready, and the game is running before save/load
   const ensureSessionReady = useCallback(async (): Promise<string | null> => {
     let sid = sessionId;
 
@@ -346,7 +314,6 @@ export default function PlayPage() {
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
-    // Create/refresh WebRTC session to make sure save/load channels exist
     await webrtcManagerRef.current.createSession(sid);
 
     if (status !== "Playing") {
@@ -367,12 +334,10 @@ export default function PlayPage() {
     return btoa(binary);
   }, []);
 
-  // Handle save state request (called from SaveStatesModal)
   const handleSaveState = useCallback(async (): Promise<{
     stateData: string;
     thumbnail: string | null;
   } | null> => {
-    console.log("[PlayPage] handleSaveState called, sessionId:", sessionId);
     const sid = await ensureSessionReady();
     if (!sid) {
       console.error("[PlayPage] No session available for save");
@@ -380,9 +345,7 @@ export default function PlayPage() {
     }
 
     return new Promise((resolve) => {
-      console.log("[PlayPage] Calling webrtcManager.saveState...");
       webrtcManagerRef.current.saveState(sid, (result) => {
-        console.log("[PlayPage] saveState callback result:", result);
         if (result.success && result.stateData) {
           resolve({
             stateData: result.stateData,
@@ -396,7 +359,6 @@ export default function PlayPage() {
     });
   }, [sessionId]);
 
-  // Handle load state request (called from SaveStatesModal)
   const handleLoadState = useCallback(
     async (stateData: ArrayBuffer): Promise<boolean> => {
       const sid = await ensureSessionReady();
@@ -413,24 +375,19 @@ export default function PlayPage() {
     [ensureSessionReady, arrayBufferToBase64Safe]
   );
 
-  // Handle stream mode change
   const handleStreamModeChange = useCallback(
     async (newMode: StreamMode) => {
       setStreamMode(newMode);
       if (sessionId) {
-        // Update server stream mode
         const result = await setServerStreamMode(sessionId, newMode);
         if (!result.success) {
           console.error("Failed to change stream mode:", result.error);
           return;
         }
 
-        // Create WebRTC session if switching to webrtc mode
         if (newMode === "webrtc" || newMode === "both") {
-          // Make sure WebRTC signaling socket is connected
           if (!webrtcManagerRef.current.isSocketConnected()) {
             webrtcManagerRef.current.connect();
-            // Wait a bit for the socket to connect
             await new Promise((resolve) => setTimeout(resolve, 500));
           }
 
@@ -438,7 +395,6 @@ export default function PlayPage() {
             sessionId
           );
           if (webrtcSuccess) {
-            // setWebrtcConnected(true);
           } else {
             console.warn("WebRTC session creation failed during mode switch");
           }
@@ -470,7 +426,6 @@ export default function PlayPage() {
 
   const isPlaying = status === "Playing";
 
-  // Touch button component for cleaner code
   const TouchButton = ({
     button,
     children,
@@ -498,14 +453,12 @@ export default function PlayPage() {
     </button>
   );
 
-  // Mobile Fullscreen Game View
   if (isMobile && isFullscreen) {
     return (
       <div
         ref={gameContainerRef}
         className="fixed inset-0 bg-black flex items-center justify-center touch-none select-none"
       >
-        {/* Game Canvas - Centered */}
         <div className="relative h-full aspect-3/2 max-w-full">
           <canvas
             ref={canvasRef}
@@ -515,11 +468,9 @@ export default function PlayPage() {
             style={{ imageRendering: "pixelated" }}
           />
 
-          {/* Scanline overlay */}
           <div className="absolute inset-0 opacity-[0.02] pointer-events-none bg-[linear-gradient(transparent_50%,rgba(0,0,0,0.5)_50%)] bg-size-[100%_4px]" />
         </div>
 
-        {/* Fullscreen Virtual Controls Overlay */}
         {showControls && (
           <>
             {/* Left Side - D-Pad */}
@@ -741,7 +692,6 @@ export default function PlayPage() {
     );
   }
 
-  // Regular Desktop/Tablet View
   return (
     <div
       ref={gameContainerRef}

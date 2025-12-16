@@ -25,7 +25,6 @@ class AuthClient {
   private user: User | null = null;
 
   constructor() {
-    // Load tokens from localStorage on initialization
     this.accessToken = localStorage.getItem("accessToken");
     this.refreshToken = localStorage.getItem("refreshToken");
     const userStr = localStorage.getItem("user");
@@ -138,7 +137,6 @@ class AuthClient {
         });
       }
     } catch {
-      // Ignore errors on logout
     } finally {
       this.clearAuth();
     }
@@ -162,13 +160,11 @@ class AuthClient {
 
       if (!response.ok) {
         if (response.status === 401) {
-          // Try to refresh token
           const refreshed = await this.refresh();
           if (refreshed.error) {
             this.clearAuth();
             return { data: null, error: { message: "Session expired" } };
           }
-          // Retry with new token
           return this.getProfile();
         }
         return { data: null, error: { message: "Failed to get profile" } };
@@ -210,7 +206,6 @@ class AuthClient {
     }
   }
 
-  // Helper to make authenticated requests
   async authenticatedFetch(url: string, options: RequestInit = {}) {
     if (!this.accessToken) {
       throw new Error("Not authenticated");
@@ -238,7 +233,6 @@ class AuthClient {
 
 export const authClient = new AuthClient();
 
-// Export convenient methods matching the original API structure
 export const signIn = {
   email: (data: { email: string; password: string }) => authClient.signIn(data),
 };

@@ -89,12 +89,9 @@ export function SaveStatesModal({
 
   // Handle save to specific slot
   const handleSaveToSlot = async (slotNumber: number) => {
-    console.log("[SaveStatesModal] Saving to slot", slotNumber);
     setActionLoading(`save-${slotNumber}`);
     try {
-      console.log("[SaveStatesModal] Calling onSave...");
       const result = await onSave();
-      console.log("[SaveStatesModal] onSave result:", result);
       if (!result) {
         console.error("Failed to capture state from emulator");
         alert("Failed to capture game state. Make sure the game is running.");

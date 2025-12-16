@@ -23,11 +23,10 @@ export class WebRTCManager {
   private socket: Socket | null = null;
   private peerConnection: RTCPeerConnection | null = null;
   private dataChannel: RTCDataChannel | null = null;
-  private audioDataChannel: RTCDataChannel | null = null; // Dedicated channel for audio
+  private audioDataChannel: RTCDataChannel | null = null;
   private webrtcSessionId: string | null = null;
   private _gameSessionId: string | null = null;
 
-  // Callbacks
   private onVideoTrackCallback?: (stream: MediaStream) => void;
   private onAudioTrackCallback?: (stream: MediaStream) => void;
   private onAudioDataCallback?: (audioData: {
@@ -39,7 +38,6 @@ export class WebRTCManager {
   private onDisconnectedCallback?: () => void;
   private onErrorCallback?: (error: Error) => void;
 
-  // IMA ADPCM Tables
   private readonly indexTable = [
     -1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8,
   ];
@@ -59,7 +57,6 @@ export class WebRTCManager {
     const predictedSample = [0, 0];
     const index = [0, 0];
 
-    // Read initial state
     for (let ch = 0; ch < channels; ch++) {
       const low = data[bufferIdx++];
       const high = data[bufferIdx++];
@@ -67,7 +64,7 @@ export class WebRTCManager {
       if (predictedSample[ch] & 0x8000) predictedSample[ch] -= 0x10000;
 
       index[ch] = data[bufferIdx++];
-      bufferIdx++; // Reserved
+      bufferIdx++;
     }
 
     const dataLen = data.length - bufferIdx;
@@ -107,7 +104,6 @@ export class WebRTCManager {
     return output;
   }
 
-  // ICE servers configuration - optimized for low latency
   private readonly iceServers: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
@@ -126,12 +122,9 @@ export class WebRTCManager {
       transports: ["websocket"],
     });
 
-    this.socket.on("connect", () => {
-      console.log("✅ [WebRTC Signaling] Connected");
-    });
+    this.socket.on("connect", () => {});
 
     this.socket.on("disconnect", () => {
-      console.log("❌ [WebRTC Signaling] Disconnected");
       this.cleanup();
       this.onDisconnectedCallback?.();
     });
@@ -180,9 +173,7 @@ export class WebRTCManager {
           }
 
           this.webrtcSessionId = response.sessionId;
-          console.log("📡 WebRTC session created:", this.webrtcSessionId);
 
-          // Create peer connection and handle offer
           const success = await this.handleOffer(response.offer);
           resolve(success);
         }
@@ -194,27 +185,22 @@ export class WebRTCManager {
     offer: RTCSessionDescriptionInit
   ): Promise<boolean> {
     try {
-      // Create peer connection with low latency optimizations
       this.peerConnection = new RTCPeerConnection({
         iceServers: this.iceServers,
-        iceCandidatePoolSize: 10, // Pre-gather candidates for faster connection
-        bundlePolicy: "max-bundle", // Bundle all media on single transport
-        rtcpMuxPolicy: "require", // Reduce ports needed
+        iceCandidatePoolSize: 10,
+        bundlePolicy: "max-bundle",
+        rtcpMuxPolicy: "require",
       });
 
-      // Set up event handlers
       this.setupPeerConnectionHandlers();
 
-      // Set remote description (offer from server)
       await this.peerConnection.setRemoteDescription(
         new RTCSessionDescription(offer)
       );
 
-      // Create and send answer
       const answer = await this.peerConnection.createAnswer();
       await this.peerConnection.setLocalDescription(answer);
 
-      // Send answer to server
       return new Promise((resolve) => {
         this.socket!.emit(
           "answer",
@@ -228,7 +214,6 @@ export class WebRTCManager {
               resolve(false);
               return;
             }
-            console.log("✅ WebRTC answer sent");
             resolve(true);
           }
         );
@@ -245,7 +230,6 @@ export class WebRTCManager {
   private setupPeerConnectionHandlers(): void {
     if (!this.peerConnection) return;
 
-    // Handle ICE candidates
     this.peerConnection.onicecandidate = (event) => {
       if (event.candidate && this.socket?.connected) {
         this.socket.emit("ice-candidate", {
@@ -255,10 +239,8 @@ export class WebRTCManager {
       }
     };
 
-    // Handle connection state changes
     this.peerConnection.onconnectionstatechange = () => {
       const state = this.peerConnection?.connectionState;
-      console.log(`[WebRTC] Connection state: ${state}`);
 
       if (state === "connected") {
         this.onConnectedCallback?.();
@@ -267,19 +249,9 @@ export class WebRTCManager {
       }
     };
 
-    // Handle ICE connection state changes
-    this.peerConnection.oniceconnectionstatechange = () => {
-      console.log(
-        `[WebRTC] ICE connection state: ${this.peerConnection?.iceConnectionState}`
-      );
-    };
+    this.peerConnection.oniceconnectionstatechange = () => {};
 
-    // Handle incoming tracks (video/audio from server)
     this.peerConnection.ontrack = (event) => {
-      console.log(`[WebRTC] Received track: ${event.track.kind}`);
-
-      // Optimize receiver for low latency
-      // playoutDelayHint = 0 tells the browser to buffer as little as possible
       if (event.receiver && "playoutDelayHint" in event.receiver) {
         (event.receiver as any).playoutDelayHint = 0;
       }
@@ -293,10 +265,7 @@ export class WebRTCManager {
       }
     };
 
-    // Handle data channel from server
     this.peerConnection.ondatachannel = (event) => {
-      console.log(`[WebRTC] Data channel received: ${event.channel.label}`);
-
       if (event.channel.label === "input") {
         this.dataChannel = event.channel;
         this.setupDataChannelHandlers();
@@ -312,13 +281,9 @@ export class WebRTCManager {
 
     this.audioDataChannel.binaryType = "arraybuffer";
 
-    this.audioDataChannel.onopen = () => {
-      console.log("[WebRTC] ✅ Audio data channel opened");
-    };
+    this.audioDataChannel.onopen = () => {};
 
-    this.audioDataChannel.onclose = () => {
-      console.log("[WebRTC] Audio data channel closed");
-    };
+    this.audioDataChannel.onclose = () => {};
 
     this.audioDataChannel.onerror = (error) => {
       console.error("[WebRTC] Audio data channel error:", error);
@@ -329,15 +294,8 @@ export class WebRTCManager {
         const buffer = event.data as ArrayBuffer;
         const dataView = new DataView(buffer);
 
-        // Debug: log occasionally
         if (Math.random() < 0.01) {
-          console.log(
-            `[WebRTC] Audio data received: ${buffer.byteLength} bytes`
-          );
         }
-
-        // Parse header (16 bytes)
-        // [SampleRate(4)][Channels(4)][Format(4)][Length(4)]
         const sampleRate = dataView.getUint32(0, true);
         const channels = dataView.getUint32(4, true);
 
@@ -363,12 +321,10 @@ export class WebRTCManager {
             dataLength = potentialLength;
             dataOffset = 16;
           } else {
-            // Fallback to old format
             dataLength = dataView.getUint32(8, true);
             dataOffset = 12;
           }
         } else {
-          // Old format
           dataLength = dataView.getUint32(8, true);
           dataOffset = 12;
         }
@@ -376,15 +332,12 @@ export class WebRTCManager {
         let audioData: Int16Array;
 
         if (format === 1) {
-          // ADPCM
           const adpcmData = new Uint8Array(buffer, dataOffset, dataLength);
           audioData = this.decodeADPCM(adpcmData, channels);
         } else {
-          // PCM
           audioData = new Int16Array(buffer, dataOffset, dataLength / 2);
         }
 
-        // Call callback with audio data
         this.onAudioDataCallback?.({
           samples: audioData,
           sampleRate,
@@ -399,24 +352,17 @@ export class WebRTCManager {
   private setupDataChannelHandlers(): void {
     if (!this.dataChannel) return;
 
-    this.dataChannel.onopen = () => {
-      console.log("[WebRTC] ✅ Data channel opened - ready for input");
-    };
+    this.dataChannel.onopen = () => {};
 
-    this.dataChannel.onclose = () => {
-      console.log("[WebRTC] Data channel closed");
-    };
+    this.dataChannel.onclose = () => {};
 
     this.dataChannel.onerror = (error) => {
       console.error("[WebRTC] Data channel error:", error);
     };
 
-    this.dataChannel.onmessage = (event) => {
-      console.log("[WebRTC] Data channel message from server:", event.data);
-    };
+    this.dataChannel.onmessage = (event) => {};
   }
 
-  // Send input through WebRTC data channel (lowest latency)
   sendInput(button: string, state: "down" | "up"): void {
     if (!this.dataChannel) {
       console.warn("[WebRTC] Data channel not available");
@@ -453,7 +399,6 @@ export class WebRTCManager {
       buffer[1] = state === "down" ? 1 : 0;
       this.dataChannel.send(buffer);
     } else {
-      // Fallback to JSON for unknown buttons or debug
       const message = JSON.stringify({
         type: "input",
         button,
@@ -464,7 +409,6 @@ export class WebRTCManager {
     }
   }
 
-  // Event callbacks
   onVideoTrack(callback: (stream: MediaStream) => void): void {
     this.onVideoTrackCallback = callback;
   }
@@ -521,21 +465,13 @@ export class WebRTCManager {
       error?: string;
     }) => void
   ): void {
-    console.log(
-      "[WebRTCManager] saveState called, gameSessionId:",
-      gameSessionId
-    );
-    console.log("[WebRTCManager] socket connected:", this.socket?.connected);
-
     if (!this.socket?.connected) {
       console.error("[WebRTCManager] Socket not connected");
       callback({ success: false, error: "Not connected" });
       return;
     }
 
-    console.log("[WebRTCManager] Emitting save-state event...");
     this.socket.emit("save-state", { gameSessionId }, (response: any) => {
-      console.log("[WebRTCManager] save-state response:", response);
       callback(response);
     });
   }
@@ -546,6 +482,7 @@ export class WebRTCManager {
    * @param stateData Base64 encoded state data
    * @param callback Called with the result
    */
+
   loadState(
     gameSessionId: string,
     stateData: string,
@@ -603,7 +540,6 @@ export class WebRTCManager {
   }
 }
 
-// WebRTC Video Renderer - renders MediaStream to canvas using WebCodecs or fallback
 export class WebRTCVideoRenderer {
   private videoElement: HTMLVideoElement | null = null;
   private canvas: HTMLCanvasElement | null = null;
@@ -614,31 +550,25 @@ export class WebRTCVideoRenderer {
   initialize(canvas: HTMLCanvasElement): void {
     this.canvas = canvas;
     this.context = canvas.getContext("2d", {
-      alpha: false, // Disable alpha for better performance
-      desynchronized: true, // Reduce latency by not syncing with display
+      alpha: false,
+      desynchronized: true,
     });
   }
 
   setVideoStream(stream: MediaStream): void {
     if (!this.canvas || !this.context) return;
 
-    // Stop previous rendering
     this.cleanup();
 
-    // Configure stream for low latency
     stream.getVideoTracks().forEach((track) => {
-      // Request low latency content hint
       if ("contentHint" in track) {
-        (track as any).contentHint = "motion"; // Optimize for gaming
+        (track as any).contentHint = "motion";
       }
     });
 
-    // Try WebCodecs (MediaStreamTrackProcessor) for lowest latency
     if ("MediaStreamTrackProcessor" in window) {
-      console.log("[WebRTC Video] Using WebCodecs (MediaStreamTrackProcessor)");
       this.renderWithWebCodecs(stream);
     } else {
-      console.log("[WebRTC Video] Fallback to HTMLVideoElement");
       this.renderWithVideoElement(stream);
     }
   }
@@ -661,7 +591,6 @@ export class WebRTCVideoRenderer {
 
         if (frame) {
           if (!signal.aborted && this.context && this.canvas) {
-            // Draw frame directly to canvas
             this.context.drawImage(
               frame,
               0,
@@ -670,13 +599,12 @@ export class WebRTCVideoRenderer {
               this.canvas.height
             );
           }
-          frame.close(); // Important: release memory immediately
+          frame.close();
         }
       }
       reader.releaseLock();
     } catch (error) {
       console.error("[WebRTC Video] WebCodecs error:", error);
-      // If WebCodecs fails, try fallback?
       if (!signal.aborted) {
         this.renderWithVideoElement(stream);
       }
@@ -684,7 +612,6 @@ export class WebRTCVideoRenderer {
   }
 
   private renderWithVideoElement(stream: MediaStream): void {
-    // Create hidden video element for rendering
     if (!this.videoElement) {
       this.videoElement = document.createElement("video");
       this.videoElement.autoplay = true;
@@ -712,7 +639,6 @@ export class WebRTCVideoRenderer {
       cancelAnimationFrame(this.animationFrameId);
     }
 
-    // Use requestVideoFrameCallback for lowest latency if available
     if (
       this.videoElement &&
       "requestVideoFrameCallback" in HTMLVideoElement.prototype
@@ -728,7 +654,6 @@ export class WebRTCVideoRenderer {
               this.canvas.height
             );
           }
-          // Request next frame callback
           (this.videoElement as any).requestVideoFrameCallback(
             renderVideoFrame
           );
@@ -736,10 +661,8 @@ export class WebRTCVideoRenderer {
       };
       (this.videoElement as any).requestVideoFrameCallback(renderVideoFrame);
     } else {
-      // Fallback to requestAnimationFrame
       const render = () => {
         if (this.videoElement && this.context && this.canvas) {
-          // Draw video frame to canvas
           if (this.videoElement.readyState >= 2) {
             this.context.drawImage(
               this.videoElement,
@@ -772,12 +695,9 @@ export class WebRTCVideoRenderer {
       this.videoElement.srcObject = null;
       this.videoElement = null;
     }
-
-    // Don't clear canvas/context as they might be reused
   }
 }
 
-// WebRTC Audio Player - plays MediaStream audio or raw PCM data with low latency
 import audioWorkletUrl from "../lib/audio-worklet-processor.ts?worker&url";
 
 export class WebRTCAudioPlayer {
@@ -786,7 +706,6 @@ export class WebRTCAudioPlayer {
   private sourceNode: MediaStreamAudioSourceNode | null = null;
   private gainNode: GainNode | null = null;
 
-  // Low-latency PCM audio playback
   private audioWorkletNode: AudioWorkletNode | null = null;
   private scriptProcessor: ScriptProcessorNode | null = null;
   private audioQueue: Float32Array[] = [];
@@ -794,11 +713,10 @@ export class WebRTCAudioPlayer {
   private currentBuffer: Float32Array | null = null;
   private currentBufferOffset: number = 0;
   private lastUnderrun: number = 0;
-  private maxQueueMs: number = 60; // Max 60ms buffer for ultra-low latency
+  private maxQueueMs: number = 60;
   private channels: number = 2;
 
   async initialize(): Promise<void> {
-    // Create audio element as fallback for MediaStream
     this.audioElement = document.createElement("audio");
     this.audioElement.autoplay = true;
     this.audioElement.muted = true;
@@ -806,24 +724,21 @@ export class WebRTCAudioPlayer {
     this.audioElement.style.display = "none";
     document.body.appendChild(this.audioElement);
 
-    // Initialize Web Audio API with low latency settings
     try {
       const AudioContextClass =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext })
           .webkitAudioContext;
 
-      // Request low latency
       this.audioContext = new AudioContextClass({
         latencyHint: "interactive",
-        sampleRate: 48000, // Match WebRTC audio rate
+        sampleRate: 48000,
       });
 
       this.gainNode = this.audioContext.createGain();
       this.gainNode.connect(this.audioContext.destination);
       this.gainNode.gain.value = 1.0;
 
-      // Load AudioWorklet module
       try {
         await this.audioContext.audioWorklet.addModule(audioWorkletUrl);
 
@@ -831,32 +746,27 @@ export class WebRTCAudioPlayer {
           this.audioContext,
           "webrtc-audio-processor",
           {
-            outputChannelCount: [2], // Stereo output
+            outputChannelCount: [2],
           }
         );
 
         this.audioWorkletNode.connect(this.gainNode);
 
-        // Handle messages from the processor (e.g. latency stats)
         this.audioWorkletNode.port.onmessage = (event) => {
           if (event.data.type === "latency") {
-            // console.log(`[AudioWorklet] Latency: ${event.data.latencyMs.toFixed(1)}ms`);
           }
         };
-
-        console.log("[WebRTC Audio] AudioWorklet initialized successfully");
       } catch (e) {
         console.error(
           "[WebRTC Audio] Failed to load AudioWorklet, falling back to ScriptProcessor:",
           e
         );
 
-        // Fallback to ScriptProcessorNode
         const bufferSize = 512;
         this.scriptProcessor = this.audioContext.createScriptProcessor(
           bufferSize,
-          0, // No input channels
-          2 // Stereo output
+          0,
+          2
         );
 
         this.scriptProcessor.onaudioprocess = (event) => {
@@ -864,7 +774,6 @@ export class WebRTCAudioPlayer {
         };
 
         this.scriptProcessor.connect(this.gainNode);
-        console.log("[WebRTC Audio] ScriptProcessor initialized as fallback");
       }
 
       console.log(
@@ -878,8 +787,6 @@ export class WebRTCAudioPlayer {
     } catch (error) {
       console.warn("[WebRTC Audio] Failed to create AudioContext:", error);
     }
-
-    console.log("[WebRTC Audio] Audio player initialized");
   }
 
   private processAudio(event: AudioProcessingEvent): void {
@@ -891,7 +798,6 @@ export class WebRTCAudioPlayer {
     let hadUnderrun = false;
 
     while (outputOffset < bufferSize) {
-      // Get next buffer from queue if needed
       if (
         !this.currentBuffer ||
         this.currentBufferOffset >= this.currentBuffer.length
@@ -907,7 +813,6 @@ export class WebRTCAudioPlayer {
       }
 
       if (this.currentBuffer) {
-        // Copy samples from current buffer to output
         const samplesAvailable =
           (this.currentBuffer.length - this.currentBufferOffset) /
           this.channels;
@@ -926,7 +831,6 @@ export class WebRTCAudioPlayer {
         this.currentBufferOffset += samplesToCopy * this.channels;
         outputOffset += samplesToCopy;
       } else {
-        // No data available - output silence (underrun)
         hadUnderrun = true;
         for (let i = outputOffset; i < bufferSize; i++) {
           outputL[i] = 0;
@@ -936,17 +840,14 @@ export class WebRTCAudioPlayer {
       }
     }
 
-    // Track underruns for debugging (but don't spam logs)
     if (hadUnderrun) {
       const now = Date.now();
       if (now - this.lastUnderrun > 1000) {
-        // console.warn("[WebRTC Audio] Buffer underrun - waiting for data");
         this.lastUnderrun = now;
       }
     }
   }
 
-  // Play PCM audio data received from DataChannel - optimized for low latency
   playPCMAudio(audioData: {
     samples: Int16Array;
     sampleRate: number;
@@ -956,7 +857,6 @@ export class WebRTCAudioPlayer {
       return;
     }
 
-    // Resume audio context if suspended
     if (this.audioContext.state === "suspended") {
       this.audioContext.resume().catch(console.error);
       return;
@@ -967,13 +867,11 @@ export class WebRTCAudioPlayer {
 
     if (samples.length === 0) return;
 
-    // Convert Int16 to Float32
     const float32Array = new Float32Array(samples.length);
     for (let i = 0; i < samples.length; i++) {
       float32Array[i] = samples[i] / 32768.0;
     }
 
-    // Resample if necessary (input rate != output rate)
     let processedSamples: Float32Array;
     if (sampleRate !== this.audioContext.sampleRate) {
       processedSamples = this.resample(
@@ -986,7 +884,6 @@ export class WebRTCAudioPlayer {
       processedSamples = float32Array;
     }
 
-    // Use AudioWorklet if available
     if (this.audioWorkletNode) {
       this.audioWorkletNode.port.postMessage(
         {
@@ -996,15 +893,10 @@ export class WebRTCAudioPlayer {
           channels: channels,
         },
         [processedSamples.buffer]
-      ); // Transfer buffer ownership for performance
-    }
-    // Fallback to ScriptProcessor
-    else if (this.scriptProcessor) {
-      // Calculate queue limits - keep buffer small for low latency
+      );
+    } else if (this.scriptProcessor) {
       const maxQueueSamples =
         (this.maxQueueMs / 1000) * this.audioContext.sampleRate;
-
-      // Drop old samples if queue is too large (to reduce latency)
       while (
         this.queuedSamples > maxQueueSamples &&
         this.audioQueue.length > 0
@@ -1015,13 +907,11 @@ export class WebRTCAudioPlayer {
         }
       }
 
-      // Add new samples to queue
       this.audioQueue.push(processedSamples);
       this.queuedSamples += processedSamples.length / channels;
     }
   }
 
-  // Simple linear interpolation resampling
   private resample(
     input: Float32Array,
     fromRate: number,
@@ -1072,27 +962,20 @@ export class WebRTCAudioPlayer {
       track.enabled = true;
     });
 
-    // Use Web Audio API if available for better control
     if (this.audioContext && this.gainNode) {
       try {
-        // Clean up previous source if any
         if (this.sourceNode) {
           this.sourceNode.disconnect();
           this.sourceNode = null;
         }
 
-        // Create new source from stream
         this.sourceNode = this.audioContext.createMediaStreamSource(stream);
         this.sourceNode.connect(this.gainNode);
-        console.log("[WebRTC Audio] ✅ Connected stream to Web Audio API");
 
-        // Resume audio context if suspended
         if (this.audioContext.state === "suspended") {
           this.audioContext
             .resume()
-            .then(() => {
-              console.log("[WebRTC Audio] ✅ AudioContext resumed");
-            })
+            .then(() => {})
             .catch((error) => {
               console.warn(
                 "[WebRTC Audio] Failed to resume AudioContext:",
@@ -1121,7 +1004,6 @@ export class WebRTCAudioPlayer {
     if (playPromise !== undefined) {
       playPromise
         .then(() => {
-          console.log("[WebRTC Audio] ✅ Audio element playback started");
           this.audioElement!.muted = false;
         })
         .catch((error) => {
@@ -1147,7 +1029,6 @@ export class WebRTCAudioPlayer {
     if (this.audioContext && this.audioContext.state === "suspended") {
       try {
         await this.audioContext.resume();
-        console.log("[WebRTC Audio] ✅ AudioContext resumed");
       } catch (error) {
         console.warn("[WebRTC Audio] Failed to resume AudioContext:", error);
       }
@@ -1159,7 +1040,6 @@ export class WebRTCAudioPlayer {
         this.audioElement.volume = 1.0;
         if (this.audioElement.paused && this.audioElement.srcObject) {
           await this.audioElement.play();
-          console.log("[WebRTC Audio] ✅ Audio element resumed");
         }
       } catch (error) {
         console.warn("[WebRTC Audio] Failed to resume audio element:", error);

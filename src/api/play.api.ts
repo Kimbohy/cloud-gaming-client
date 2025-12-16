@@ -1,6 +1,5 @@
 import { io, Socket } from "socket.io-client";
 
-// Custom API Error class
 export class PlayApiError extends Error {
   status?: number;
   isNetworkError: boolean;
@@ -17,7 +16,6 @@ export class PlayApiError extends Error {
   }
 }
 
-// Helper function to handle fetch with error handling
 async function fetchWithErrorHandling<T>(
   url: string,
   options?: RequestInit
@@ -42,7 +40,6 @@ async function fetchWithErrorHandling<T>(
       throw error;
     }
 
-    // Network error (server not started, no connection, etc.)
     if (error instanceof TypeError) {
       throw new PlayApiError(
         "Impossible de se connecter au serveur. Vérifiez que le serveur est démarré.",
@@ -59,7 +56,6 @@ async function fetchWithErrorHandling<T>(
   }
 }
 
-// Types
 export interface GameSession {
   sessionId: string;
 }
@@ -89,13 +85,10 @@ export type InputButton =
 
 export type InputState = "down" | "up";
 
-// Configuration - Use current hostname to support IP access
 const getServerHost = () => {
-  // If env variable is set, use it (should NOT include /api)
   if (import.meta.env.VITE_SERVER_URL) {
     return import.meta.env.VITE_SERVER_URL;
   }
-  // Otherwise, use the current browser hostname with server port
   const hostname = window.location.hostname;
   return `http://${hostname}:3000`;
 };
@@ -104,13 +97,9 @@ const getApiBaseUrl = () => `${getServerHost()}/api`;
 
 const getSocketUrl = () => getServerHost();
 
-// Stream mode type
 export type StreamMode = "websocket" | "webrtc" | "both";
 
-// Key mapping type
 export type KeyMappings = Record<InputButton, string>;
-
-// Default key mappings
 export const DEFAULT_KEY_MAPPINGS: KeyMappings = {
   UP: "ArrowUp",
   DOWN: "ArrowDown",
@@ -124,16 +113,13 @@ export const DEFAULT_KEY_MAPPINGS: KeyMappings = {
   SELECT: "Shift",
 };
 
-// localStorage key for saved mappings
 const STORAGE_KEY = "cloudgaming_key_mappings";
 
-// Load saved key mappings from localStorage
 export function loadKeyMappings(): KeyMappings {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      // Merge with defaults to ensure all buttons have mappings
       return { ...DEFAULT_KEY_MAPPINGS, ...parsed };
     }
   } catch (e) {
@@ -142,7 +128,6 @@ export function loadKeyMappings(): KeyMappings {
   return { ...DEFAULT_KEY_MAPPINGS };
 }
 
-// Save key mappings to localStorage
 export function saveKeyMappings(mappings: KeyMappings): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(mappings));
@@ -151,13 +136,11 @@ export function saveKeyMappings(mappings: KeyMappings): void {
   }
 }
 
-// Reset key mappings to defaults
 export function resetKeyMappings(): KeyMappings {
   localStorage.removeItem(STORAGE_KEY);
   return { ...DEFAULT_KEY_MAPPINGS };
 }
 
-// Get display name for a key
 export function getKeyDisplayName(key: string): string {
   const keyDisplayMap: Record<string, string> = {
     ArrowUp: "↑",
@@ -176,13 +159,11 @@ export function getKeyDisplayName(key: string): string {
   return keyDisplayMap[key] || key.toUpperCase();
 }
 
-// Convert key event to button using custom mappings
 export function keyToButton(
   key: string,
   mappings?: KeyMappings
 ): InputButton | null {
   const currentMappings = mappings || loadKeyMappings();
-  // Find button that maps to this key
   for (const [button, mappedKey] of Object.entries(currentMappings)) {
     if (mappedKey === key) {
       return button as InputButton;
@@ -191,7 +172,6 @@ export function keyToButton(
   return null;
 }
 
-// Session API
 export async function createGameSession(
   romPath: string,
   streamMode: StreamMode = "websocket"
@@ -226,7 +206,6 @@ export async function stopGameSession(sessionId: string): Promise<void> {
   );
 }
 
-// WebSocket Management - Multi-channel for better performance
 export class GameSocketManager {
   private controlSocket: Socket | null = null;
   private videoSocket: Socket | null = null;
@@ -244,40 +223,31 @@ export class GameSocketManager {
   connect(): void {
     const serverUrl = getSocketUrl();
 
-    // Control socket (main namespace)
     this.controlSocket = io(serverUrl, {
-      transports: ["websocket"], // Force WebSocket only
+      transports: ["websocket"],
     });
 
-    // Video stream socket (separate namespace)
     this.videoSocket = io(`${serverUrl}/video`, {
       transports: ["websocket"],
     });
 
-    // Audio stream socket (separate namespace)
     this.audioSocket = io(`${serverUrl}/audio`, {
       transports: ["websocket"],
     });
 
-    // Input socket (separate namespace)
     this.inputSocket = io(`${serverUrl}/input`, {
       transports: ["websocket"],
     });
 
-    // Setup control socket handlers
     this.controlSocket.on("connect", () => {
-      console.log("✅ [Control] Connected");
       this.checkAllConnected();
     });
 
     this.controlSocket.on("disconnect", () => {
-      console.log("❌ [Control] Disconnected");
       this.onDisconnectCallback?.();
     });
 
-    // Setup video socket handlers
     this.videoSocket.on("connect", () => {
-      console.log("✅ [Video] Connected");
       this.checkAllConnected();
     });
 
@@ -285,13 +255,9 @@ export class GameSocketManager {
       this.onFrameCallback?.(data);
     });
 
-    this.videoSocket.on("disconnect", () => {
-      console.log("❌ [Video] Disconnected");
-    });
+    this.videoSocket.on("disconnect", () => {});
 
-    // Setup audio socket handlers
     this.audioSocket.on("connect", () => {
-      console.log("✅ [Audio] Connected");
       this.checkAllConnected();
     });
 
@@ -299,19 +265,13 @@ export class GameSocketManager {
       this.onAudioCallback?.(data);
     });
 
-    this.audioSocket.on("disconnect", () => {
-      console.log("❌ [Audio] Disconnected");
-    });
+    this.audioSocket.on("disconnect", () => {});
 
-    // Setup input socket handlers
     this.inputSocket.on("connect", () => {
-      console.log("✅ [Input] Connected");
       this.checkAllConnected();
     });
 
-    this.inputSocket.on("disconnect", () => {
-      console.log("❌ [Input] Disconnected");
-    });
+    this.inputSocket.on("disconnect", () => {});
   }
 
   private checkAllConnected(): void {
@@ -322,7 +282,6 @@ export class GameSocketManager {
       this.inputSocket?.connected;
 
     if (allConnected && this.connectionCount === 0) {
-      console.log("🎮 All channels connected - Ready to play!");
       this.connectionCount = this.expectedConnections;
       this.onConnectCallback?.();
     }
@@ -346,8 +305,6 @@ export class GameSocketManager {
       throw new Error("Sockets not connected");
     }
 
-    // Subscribe on all channels
-    console.log("📡 Subscribing to session:", sessionId);
     this.controlSocket?.emit("subscribe", { sessionId });
     this.videoSocket?.emit("subscribe", { sessionId });
     this.audioSocket?.emit("subscribe", { sessionId });
@@ -360,7 +317,6 @@ export class GameSocketManager {
       return;
     }
 
-    // Send through dedicated input channel for minimal latency
     this.inputSocket.emit("input", { sessionId, button, state });
   }
 
@@ -390,7 +346,6 @@ export class GameSocketManager {
   }
 }
 
-// Audio Management
 export class GameAudioManager {
   private audioContext: AudioContext | null = null;
   private audioBufferQueue: AudioBufferSourceNode[] = [];
@@ -410,7 +365,6 @@ export class GameAudioManager {
   async resume(): Promise<void> {
     if (this.audioContext?.state === "suspended") {
       await this.audioContext.resume();
-      console.log("Audio context resumed");
     }
   }
 
@@ -422,27 +376,21 @@ export class GameAudioManager {
 
     const audioContext = this.audioContext;
 
-    // Resume audio context if suspended (browser autoplay policy)
     if (audioContext.state === "suspended") {
-      audioContext.resume().then(() => {
-        console.log("Audio context resumed");
-      });
+      audioContext.resume().then(() => {});
     }
 
     try {
-      // Decode base64 audio data
       const binaryString = atob(audioData.data);
       const bytes = new Uint8Array(binaryString.length);
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
       }
 
-      // Convert PCM int16 to float32 for Web Audio API
       const int16Array = new Int16Array(bytes.buffer);
       const float32Array = new Float32Array(int16Array.length);
 
       for (let i = 0; i < int16Array.length; i++) {
-        // Convert int16 (-32768 to 32767) to float32 (-1.0 to 1.0)
         float32Array[i] = int16Array[i] / 32768.0;
       }
 
@@ -450,14 +398,12 @@ export class GameAudioManager {
       const channels = audioData.channels || 2;
       const samplesPerChannel = float32Array.length / channels;
 
-      // Create audio buffer
       const audioBuffer = audioContext.createBuffer(
         channels,
         samplesPerChannel,
         sampleRate
       );
 
-      // Fill buffer with audio data (interleaved to planar)
       for (let channel = 0; channel < channels; channel++) {
         const channelData = audioBuffer.getChannelData(channel);
         for (let i = 0; i < samplesPerChannel; i++) {
@@ -465,22 +411,18 @@ export class GameAudioManager {
         }
       }
 
-      // Create buffer source and play
       const source = audioContext.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(audioContext.destination);
 
-      // Schedule playback
       const currentTime = audioContext.currentTime;
       const startTime = Math.max(currentTime, this.nextPlayTime);
 
       source.start(startTime);
 
-      // Update next play time
       const duration = audioBuffer.duration;
       this.nextPlayTime = startTime + duration;
 
-      // Clean up after playback
       source.onended = () => {
         const index = this.audioBufferQueue.indexOf(source);
         if (index > -1) {
@@ -490,7 +432,6 @@ export class GameAudioManager {
 
       this.audioBufferQueue.push(source);
 
-      // Log occasionally for debugging
       if (Math.random() < 0.01) {
         console.log("Playing audio:", {
           samples: samplesPerChannel,
@@ -506,17 +447,13 @@ export class GameAudioManager {
   }
 
   cleanup(): void {
-    // Stop all audio sources
     this.audioBufferQueue.forEach((node) => {
       try {
         node.stop();
-      } catch (e) {
-        // Ignore if already stopped
-      }
+      } catch (e) {}
     });
     this.audioBufferQueue = [];
 
-    // Close audio context
     if (this.audioContext) {
       this.audioContext.close();
       this.audioContext = null;
@@ -524,7 +461,6 @@ export class GameAudioManager {
   }
 }
 
-// Video/Canvas Management
 export class GameCanvasManager {
   private canvas: HTMLCanvasElement | null = null;
   private context: CanvasRenderingContext2D | null = null;
@@ -541,11 +477,9 @@ export class GameCanvasManager {
     }
 
     if (frameData.format === "png" && frameData.data) {
-      // Decode PNG frame
       const img = new Image();
       img.onload = () => {
         if (this.context) {
-          // Clear and draw image at native resolution
           this.context.clearRect(0, 0, 240, 160);
           this.context.drawImage(img, 0, 0, 240, 160);
         }
@@ -555,7 +489,6 @@ export class GameCanvasManager {
       };
       img.src = `data:image/png;base64,${frameData.data}`;
     } else {
-      // Fallback: render mock data with random colors
       console.warn("Using fallback rendering - no PNG data");
       this.context.fillStyle = `rgb(${Math.random() * 255}, ${
         Math.random() * 255
@@ -565,7 +498,6 @@ export class GameCanvasManager {
   }
 }
 
-// Input Management
 export class GameInputManager {
   private sessionId: string | null = null;
   private socketManager: GameSocketManager;
@@ -582,7 +514,6 @@ export class GameInputManager {
     this.sessionId = sessionId;
   }
 
-  // Update key mappings (call when user changes settings)
   updateKeyMappings(mappings: KeyMappings): void {
     this.keyMappings = mappings;
   }
