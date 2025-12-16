@@ -97,6 +97,7 @@ export function SaveStatesModal({
       console.log("[SaveStatesModal] onSave result:", result);
       if (!result) {
         console.error("Failed to capture state from emulator");
+        alert("Failed to capture game state. Make sure the game is running.");
         return;
       }
 
@@ -115,6 +116,11 @@ export function SaveStatesModal({
       await loadSaveStates();
     } catch (error) {
       console.error("Failed to save state:", error);
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Failed to save state. Please try again."
+      );
     } finally {
       setActionLoading(null);
     }

@@ -356,6 +356,17 @@ export default function PlayPage() {
     return sid;
   }, [sessionId, status, createSession, startSession]);
 
+  const arrayBufferToBase64Safe = useCallback((buffer: ArrayBuffer) => {
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000;
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const sub = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...sub);
+    }
+    return btoa(binary);
+  }, []);
+
   // Handle save state request (called from SaveStatesModal)
   const handleSaveState = useCallback(async (): Promise<{
     stateData: string;
@@ -391,7 +402,7 @@ export default function PlayPage() {
       const sid = await ensureSessionReady();
       if (!sid) return false;
 
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(stateData)));
+      const base64 = arrayBufferToBase64Safe(stateData);
 
       return new Promise((resolve) => {
         webrtcManagerRef.current.loadState(sid, base64, (result) => {
@@ -399,7 +410,7 @@ export default function PlayPage() {
         });
       });
     },
-    [ensureSessionReady]
+    [ensureSessionReady, arrayBufferToBase64Safe]
   );
 
   // Handle stream mode change

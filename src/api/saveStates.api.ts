@@ -80,7 +80,8 @@ function invalidateCache(): void {
 function getUserId(): string {
   const user = authClient.getUser();
   if (!user) {
-    throw new Error("Not authenticated");
+    console.error("[SaveStates API] User not authenticated:", { user });
+    throw new Error("User not authenticated. Please log in again.");
   }
   return user.id;
 }
