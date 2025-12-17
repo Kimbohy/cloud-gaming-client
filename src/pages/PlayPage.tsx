@@ -1065,12 +1065,16 @@ export default function PlayPage() {
       <div
         className={`relative mx-auto max-w-6xl ${
           isMobile
-            ? " h-screen flex flex-col px-3 py-1.5 min-h-0"
+            ? " h-screen flex flex-col items-center px-3 py-8 min-h-0"
             : "container px-4 py-4 md:py-8"
         }`}
       >
         {/* Header - Compact on mobile */}
-        <div className={`shrink-0 ${isMobile ? "mb-1" : "mb-4 md:mb-8"}`}>
+        <div
+          className={`shrink-0 w-full ${
+            isMobile ? "mb-1 flex flex-col gap-5 " : "mb-4 md:mb-8"
+          }`}
+        >
           <button
             onClick={() => navigate("/roms")}
             className={`group inline-flex items-center gap-2 text-slate-400 hover:text-white transition-colors ${
@@ -1168,21 +1172,19 @@ export default function PlayPage() {
         <div
           className={`${
             isMobile
-              ? "flex-1 flex flex-col min-h-0 gap-1.5"
+              ? "flex flex-col pt-10 gap-1.5 w-full max-w-md"
               : "grid lg:grid-cols-4 gap-4 md:gap-6"
           }`}
         >
           {/* Game Screen */}
           <div
             className={`lg:col-span-3 ${
-              isMobile
-                ? "flex flex-col min-h-0 w-full h-full z-10"
-                : "space-y-4"
+              isMobile ? "flex flex-col w-full z-10" : "space-y-4"
             }`}
           >
             <div
               className={`relative bg-slate-900/50 border border-slate-700/50 backdrop-blur-sm overflow-hidden ${
-                isMobile ? "shrink-0 rounded-lg" : "rounded-2xl"
+                isMobile ? "shrink-0 rounded-lg p-1.5 pb-2" : "rounded-2xl"
               }`}
             >
               {/* Game Canvas Container */}
@@ -1384,7 +1386,7 @@ export default function PlayPage() {
 
             {/* Mobile Virtual Controller (Portrait Mode) */}
             {isMobile && sessionId && !isFullscreen && (
-              <div className="bg-slate-900/50 border border-slate-700/50 rounded-lg backdrop-blur-sm p-2 shrink-0">
+              <div className="bg-slate-900/50 border border-slate-700/50 rounded-lg backdrop-blur-sm p-2 shrink-0 mt-8">
                 {/* L/R Buttons at top */}
                 <div className="flex justify-between mb-2">
                   <TouchButton
