@@ -1,4 +1,4 @@
-import { type InputButton } from "@/api/play.api";
+import type { InputButton } from "@/api/play.api";
 
 interface TouchButtonProps {
   button: InputButton;
