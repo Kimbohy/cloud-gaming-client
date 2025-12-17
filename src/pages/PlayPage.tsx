@@ -713,7 +713,7 @@ export default function PlayPage() {
       <div
         className={`relative mx-auto max-w-6xl ${
           isMobile
-            ? " h-screen flex flex-col px-2 py-1.5 min-h-0"
+            ? " h-screen flex flex-col px-3 py-1.5 min-h-0"
             : "container px-4 py-4 md:py-8"
         }`}
       >
@@ -1008,32 +1008,32 @@ export default function PlayPage() {
 
             {/* Mobile Virtual Controller (Portrait Mode) */}
             {isMobile && sessionId && !isFullscreen && (
-              <div className="bg-slate-900/50 border border-slate-700/50 rounded-lg backdrop-blur-sm p-1.5 flex-1 min-h-0 flex flex-col justify-center">
+              <div className="bg-slate-900/50 border border-slate-700/50 rounded-lg backdrop-blur-sm p-2 shrink-0">
                 {/* L/R Buttons at top */}
-                <div className="flex justify-between mb-1 shrink-0">
+                <div className="flex justify-between mb-2">
                   <TouchButton
                     button="L"
-                    className="h-6 px-3 bg-slate-700 active:bg-purple-600 rounded text-[10px] font-bold text-slate-300"
+                    className="h-7 px-4 bg-slate-700 active:bg-purple-600 rounded text-[10px] font-bold text-slate-300"
                   >
                     L
                   </TouchButton>
                   <TouchButton
                     button="R"
-                    className="h-6 px-3 bg-slate-700 active:bg-purple-600 rounded text-[10px] font-bold text-slate-300"
+                    className="h-7 px-4 bg-slate-700 active:bg-purple-600 rounded text-[10px] font-bold text-slate-300"
                   >
                     R
                   </TouchButton>
                 </div>
 
-                <div className="flex items-center justify-between flex-1 min-h-0 px-2">
+                <div className="flex items-center justify-between px-2">
                   {/* D-Pad */}
-                  <div className="relative w-20 h-20">
+                  <div className="relative w-24 h-24">
                     <TouchButton
                       button="UP"
-                      className="absolute top-0 left-1/2 -translate-x-1/2 w-7 h-7 bg-slate-700 active:bg-cyan-600 rounded-t flex items-center justify-center"
+                      className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-8 bg-slate-700 active:bg-cyan-600 rounded-t-lg flex items-center justify-center"
                     >
                       <svg
-                        className="w-2.5 h-2.5 text-cyan-300"
+                        className="w-3 h-3 text-cyan-300"
                         fill="currentColor"
                         viewBox="0 0 24 24"
                       >
@@ -1042,10 +1042,10 @@ export default function PlayPage() {
                     </TouchButton>
                     <TouchButton
                       button="DOWN"
-                      className="absolute bottom-0 left-1/2 -translate-x-1/2 w-7 h-7 bg-slate-700 active:bg-cyan-600 rounded-b flex items-center justify-center"
+                      className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-8 bg-slate-700 active:bg-cyan-600 rounded-b-lg flex items-center justify-center"
                     >
                       <svg
-                        className="w-2.5 h-2.5 text-cyan-300"
+                        className="w-3 h-3 text-cyan-300"
                         fill="currentColor"
                         viewBox="0 0 24 24"
                       >
@@ -1054,10 +1054,10 @@ export default function PlayPage() {
                     </TouchButton>
                     <TouchButton
                       button="LEFT"
-                      className="absolute left-0 top-1/2 -translate-y-1/2 w-7 h-7 bg-slate-700 active:bg-cyan-600 rounded-l flex items-center justify-center"
+                      className="absolute left-0 top-1/2 -translate-y-1/2 w-8 h-8 bg-slate-700 active:bg-cyan-600 rounded-l-lg flex items-center justify-center"
                     >
                       <svg
-                        className="w-2.5 h-2.5 text-cyan-300"
+                        className="w-3 h-3 text-cyan-300"
                         fill="currentColor"
                         viewBox="0 0 24 24"
                       >
@@ -1066,7 +1066,7 @@ export default function PlayPage() {
                     </TouchButton>
                     <TouchButton
                       button="RIGHT"
-                      className="absolute right-0 top-1/2 -translate-y-1/2 w-7 h-7 bg-slate-700 active:bg-cyan-600 rounded-r flex items-center justify-center"
+                      className="absolute right-0 top-1/2 -translate-y-1/2 w-8 h-8 bg-slate-700 active:bg-cyan-600 rounded-r-lg flex items-center justify-center"
                     >
                       <svg
                         className="w-3 h-3 text-cyan-300"
@@ -1076,36 +1076,36 @@ export default function PlayPage() {
                         <path d="M20 12l-8 8V4z" />
                       </svg>
                     </TouchButton>
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-6 bg-slate-600 rounded-full" />
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-7 h-7 bg-slate-600 rounded-full" />
                   </div>
 
                   {/* Center Buttons */}
-                  <div className="flex flex-col gap-1">
+                  <div className="flex flex-col gap-2">
                     <TouchButton
                       button="SELECT"
-                      className="h-4 px-2 bg-slate-700 active:bg-slate-600 rounded-full text-[8px] font-bold text-slate-300"
+                      className="h-5 px-3 bg-slate-700 active:bg-slate-600 rounded-full text-[9px] font-bold text-slate-300"
                     >
                       SELECT
                     </TouchButton>
                     <TouchButton
                       button="START"
-                      className="h-4 px-2 bg-emerald-600 active:bg-emerald-500 rounded-full text-[8px] font-bold text-white"
+                      className="h-5 px-3 bg-emerald-600 active:bg-emerald-500 rounded-full text-[9px] font-bold text-white"
                     >
                       START
                     </TouchButton>
                   </div>
 
-                  {/* Action Buttons */}
-                  <div className="relative w-16 h-16">
+                  {/* Action Buttons - Fixed positioning to prevent overlap */}
+                  <div className="relative w-24 h-24">
                     <TouchButton
                       button="B"
-                      className="absolute left-0 top-1/2 -translate-y-1/4 w-8 h-8 bg-rose-600 active:bg-rose-500 rounded-full font-black text-xs text-white flex items-center justify-center"
+                      className="absolute left-0 bottom-2 w-10 h-10 bg-rose-600 active:bg-rose-500 rounded-full font-black text-sm text-white flex items-center justify-center shadow-lg"
                     >
                       B
                     </TouchButton>
                     <TouchButton
                       button="A"
-                      className="absolute right-0 top-1/2 -translate-y-3/4 w-8 h-8 bg-fuchsia-600 active:bg-fuchsia-500 rounded-full font-black text-xs text-white flex items-center justify-center"
+                      className="absolute right-0 top-2 w-10 h-10 bg-fuchsia-600 active:bg-fuchsia-500 rounded-full font-black text-sm text-white flex items-center justify-center shadow-lg"
                     >
                       A
                     </TouchButton>
