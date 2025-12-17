@@ -26,6 +26,13 @@ import {
 import { useQueryState } from "nuqs";
 import { ControlsConfigDialog } from "@/components/ControlsConfigDialog";
 import { SaveStatesModal } from "@/components/SaveStatesModal";
+import {
+  listSaveStates,
+  saveState,
+  loadStateById,
+  base64ToArrayBuffer,
+  type SaveStateMetadata,
+} from "@/api/saveStates.api";
 
 interface ErrorState {
   message: string;
@@ -61,6 +68,13 @@ export default function PlayPage() {
   const [keyMappings, setKeyMappings] = useState<KeyMappings>(loadKeyMappings);
 
   const [showSaveStatesModal, setShowSaveStatesModal] = useState(false);
+  const [showInlineSavePanel, setShowInlineSavePanel] = useState(false);
+  const [inlineSaveStates, setInlineSaveStates] = useState<SaveStateMetadata[]>(
+    []
+  );
+  const [inlineSaveLoading, setInlineSaveLoading] = useState<string | null>(
+    null
+  );
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameContainerRef = useRef<HTMLDivElement>(null);
@@ -134,7 +148,12 @@ export default function PlayPage() {
 
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isNowFullscreen = !!document.fullscreenElement;
+      setIsFullscreen(isNowFullscreen);
+      // Close inline save panel when exiting fullscreen
+      if (!isNowFullscreen) {
+        setShowInlineSavePanel(false);
+      }
     };
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () =>
@@ -424,6 +443,86 @@ export default function PlayPage() {
     }
   };
 
+  // Inline save panel functions for fullscreen mode
+  const loadInlineSaveStates = useCallback(async () => {
+    if (!romId) return;
+    try {
+      const states = await listSaveStates(romId);
+      setInlineSaveStates(states);
+    } catch (error) {
+      console.error("Failed to load save states:", error);
+    }
+  }, [romId]);
+
+  const handleInlineQuickSave = async () => {
+    if (!romId) return;
+    setInlineSaveLoading("quick-save");
+    try {
+      const result = await handleSaveState();
+      if (!result) {
+        console.error("Failed to capture state");
+        return;
+      }
+      const usedSlots = new Set(inlineSaveStates.map((s) => s.slotNumber));
+      let nextSlot = 0;
+      for (let i = 0; i < 10; i++) {
+        if (!usedSlots.has(i)) {
+          nextSlot = i;
+          break;
+        }
+      }
+      const stateData = base64ToArrayBuffer(result.stateData);
+      const thumbnail = result.thumbnail
+        ? base64ToArrayBuffer(result.thumbnail)
+        : undefined;
+      await saveState({ romId, slotNumber: nextSlot, stateData, thumbnail });
+      await loadInlineSaveStates();
+    } catch (error) {
+      console.error("Failed to save:", error);
+    } finally {
+      setInlineSaveLoading(null);
+    }
+  };
+
+  const handleInlineLoadState = async (state: SaveStateMetadata) => {
+    setInlineSaveLoading(`load-${state.id}`);
+    try {
+      const stateData = await loadStateById(state.id);
+      await handleLoadState(stateData);
+      setShowInlineSavePanel(false);
+    } catch (error) {
+      console.error("Failed to load state:", error);
+    } finally {
+      setInlineSaveLoading(null);
+    }
+  };
+
+  const handleInlineSaveToSlot = async (slotNumber: number) => {
+    if (!romId) return;
+    setInlineSaveLoading(`save-${slotNumber}`);
+    try {
+      const result = await handleSaveState();
+      if (!result) return;
+      const stateData = base64ToArrayBuffer(result.stateData);
+      const thumbnail = result.thumbnail
+        ? base64ToArrayBuffer(result.thumbnail)
+        : undefined;
+      await saveState({ romId, slotNumber, stateData, thumbnail });
+      await loadInlineSaveStates();
+    } catch (error) {
+      console.error("Failed to save:", error);
+    } finally {
+      setInlineSaveLoading(null);
+    }
+  };
+
+  // Load save states when inline panel opens
+  useEffect(() => {
+    if (showInlineSavePanel) {
+      loadInlineSaveStates();
+    }
+  }, [showInlineSavePanel, loadInlineSaveStates]);
+
   const isPlaying = status === "Playing";
 
   const TouchButton = ({
@@ -597,6 +696,34 @@ export default function PlayPage() {
                   </span>
                 </button>
 
+                {/* Save States Button - Opens inline panel */}
+                {rom && (
+                  <button
+                    onClick={() => setShowInlineSavePanel(!showInlineSavePanel)}
+                    className={`p-2 rounded-lg flex items-center gap-1 ${
+                      showInlineSavePanel
+                        ? "bg-amber-500 text-white"
+                        : "bg-amber-600/80 text-amber-300"
+                    }`}
+                    title="Save States"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                      />
+                    </svg>
+                    <span className="text-[10px] font-bold">SAVE</span>
+                  </button>
+                )}
+
                 <button
                   onClick={() => setShowControls(false)}
                   className="p-2 bg-slate-800/80 rounded-lg text-slate-400"
@@ -659,6 +786,231 @@ export default function PlayPage() {
               </TouchButton>
             </div>
           </>
+        )}
+
+        {/* Inline Save States Panel - Fullscreen Mode */}
+        {showInlineSavePanel && rom && (
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-slate-900/95 border border-slate-700 rounded-2xl p-4 max-w-md w-full mx-4 max-h-[80vh] overflow-y-auto">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-white font-bold flex items-center gap-2">
+                  <svg
+                    className="w-5 h-5 text-amber-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                    />
+                  </svg>
+                  Save States
+                </h3>
+                <button
+                  onClick={() => setShowInlineSavePanel(false)}
+                  className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Quick Save Button */}
+              <button
+                onClick={handleInlineQuickSave}
+                disabled={inlineSaveLoading !== null}
+                className="w-full mb-4 p-3 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded-xl text-white font-bold flex items-center justify-center gap-2"
+              >
+                {inlineSaveLoading === "quick-save" ? (
+                  <svg
+                    className="w-5 h-5 animate-spin"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                  </svg>
+                ) : (
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                    />
+                  </svg>
+                )}
+                Quick Save
+              </button>
+
+              {/* Save Slots */}
+              <div className="space-y-2">
+                {[0, 1, 2, 3, 4].map((slotNumber) => {
+                  const state = inlineSaveStates.find(
+                    (s) => s.slotNumber === slotNumber
+                  );
+                  const isLoading =
+                    inlineSaveLoading === `load-${state?.id}` ||
+                    inlineSaveLoading === `save-${slotNumber}`;
+
+                  return (
+                    <div
+                      key={slotNumber}
+                      className={`p-3 rounded-xl border ${
+                        state
+                          ? "bg-slate-800/80 border-slate-600"
+                          : "bg-slate-800/40 border-slate-700 border-dashed"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-mono text-slate-400 bg-slate-700 px-2 py-0.5 rounded">
+                              Slot {slotNumber + 1}
+                            </span>
+                            {state ? (
+                              <span className="text-sm text-white truncate">
+                                {state.name || "Save"}
+                              </span>
+                            ) : (
+                              <span className="text-sm text-slate-500">
+                                Empty
+                              </span>
+                            )}
+                          </div>
+                          {state && (
+                            <div className="text-[10px] text-slate-500 mt-1">
+                              {new Date(state.lastUsedAt).toLocaleString()}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2 ml-2">
+                          {state && (
+                            <button
+                              onClick={() => handleInlineLoadState(state)}
+                              disabled={isLoading}
+                              className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 rounded-lg text-white text-xs font-bold flex items-center gap-1"
+                            >
+                              {inlineSaveLoading === `load-${state.id}` ? (
+                                <svg
+                                  className="w-3 h-3 animate-spin"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <circle
+                                    className="opacity-25"
+                                    cx="12"
+                                    cy="12"
+                                    r="10"
+                                    stroke="currentColor"
+                                    strokeWidth="4"
+                                  />
+                                  <path
+                                    className="opacity-75"
+                                    fill="currentColor"
+                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                                  />
+                                </svg>
+                              ) : (
+                                <svg
+                                  className="w-3 h-3"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                                  />
+                                </svg>
+                              )}
+                              Load
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleInlineSaveToSlot(slotNumber)}
+                            disabled={isLoading}
+                            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded-lg text-white text-xs font-bold flex items-center gap-1"
+                          >
+                            {inlineSaveLoading === `save-${slotNumber}` ? (
+                              <svg
+                                className="w-3 h-3 animate-spin"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                              >
+                                <circle
+                                  className="opacity-25"
+                                  cx="12"
+                                  cy="12"
+                                  r="10"
+                                  stroke="currentColor"
+                                  strokeWidth="4"
+                                />
+                                <path
+                                  className="opacity-75"
+                                  fill="currentColor"
+                                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                                />
+                              </svg>
+                            ) : (
+                              <svg
+                                className="w-3 h-3"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                                />
+                              </svg>
+                            )}
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Hidden controls toggle */}
@@ -929,7 +1281,7 @@ export default function PlayPage() {
                               strokeLinecap="round"
                               strokeLinejoin="round"
                               strokeWidth={2}
-                              d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"
+                              d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-15.857 21.213 0"
                             />
                           ) : (
                             <path
@@ -939,6 +1291,30 @@ export default function PlayPage() {
                               d="M5 12h14M12 5l7 7-7 7"
                             />
                           )}
+                        </svg>
+                      </Button>
+                    )}
+
+                    {/* Save States Button - Mobile */}
+                    {isMobile && rom && (
+                      <Button
+                        onClick={() => setShowSaveStatesModal(true)}
+                        size="sm"
+                        className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-1.5 py-1 rounded h-6"
+                        title="Save States"
+                      >
+                        <svg
+                          className="w-3 h-3"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                          />
                         </svg>
                       </Button>
                     )}
