@@ -1,7 +1,6 @@
 const API_URL =
   import.meta.env.VITE_API_BASE_URL || "http:// 192.168.11.78:3000";
 
-// Custom API Error class
 export class ApiError extends Error {
   status?: number;
   isNetworkError: boolean;
@@ -18,7 +17,6 @@ export class ApiError extends Error {
   }
 }
 
-// Helper function to handle fetch with error handling
 async function fetchWithErrorHandling<T>(
   url: string,
   options?: RequestInit
@@ -41,7 +39,6 @@ async function fetchWithErrorHandling<T>(
       throw error;
     }
 
-    // Network error (server not started, no connection, etc.)
     if (error instanceof TypeError) {
       throw new ApiError(
         "Impossible de se connecter au serveur. Vérifiez que le serveur est démarré.",
@@ -58,7 +55,6 @@ async function fetchWithErrorHandling<T>(
   }
 }
 
-// Types
 export interface Rom {
   id: string;
   name: string;
@@ -85,7 +81,6 @@ export interface UpdateRomDto {
   description?: string;
 }
 
-// API Functions
 export async function getAllRoms(): Promise<Rom[]> {
   return fetchWithErrorHandling<Rom[]>(`${API_URL}/roms`);
 }

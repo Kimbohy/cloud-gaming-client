@@ -20,9 +20,8 @@ export interface SaveStateMetadata {
   hasThumbnail: boolean;
 }
 
-// LocalStorage cache key
 const CACHE_KEY = "cloud-gaming-save-states-cache";
-const CACHE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
+const CACHE_EXPIRY_MS = 5 * 60 * 1000;
 
 interface CacheEntry {
   data: SaveStateMetadata[];
@@ -62,9 +61,7 @@ function updateCache(states: SaveStateMetadata[]): void {
       timestamp: Date.now(),
     };
     localStorage.setItem(CACHE_KEY, JSON.stringify(entry));
-  } catch {
-    // Ignore storage errors
-  }
+  } catch {}
 }
 
 /**
@@ -92,7 +89,6 @@ function getUserId(): string {
 export async function listSaveStates(
   romId?: string
 ): Promise<SaveStateMetadata[]> {
-  // Try cache first
   const cached = getCachedStates(romId);
   if (cached) {
     return cached;
@@ -112,7 +108,6 @@ export async function listSaveStates(
 
   const states: SaveStateMetadata[] = await response.json();
 
-  // Update cache with all states if no filter
   if (!romId) {
     updateCache(states);
   }
@@ -280,7 +275,6 @@ export async function deleteStateBySlot(
   invalidateCache();
 }
 
-// Helper functions
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = "";

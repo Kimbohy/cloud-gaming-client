@@ -43,8 +43,6 @@ interface AudioState {
   maxQueueMs: number;
 }
 
-// Global state for the processor (moved inside class for better encapsulation)
-
 class WebRTCAudioWorkletProcessor extends AudioWorkletProcessor {
   private sampleRate: number = 48000;
   private channels: number = 2;
@@ -52,13 +50,11 @@ class WebRTCAudioWorkletProcessor extends AudioWorkletProcessor {
   private queuedSamples: number = 0;
   private currentBuffer: Float32Array | null = null;
   private currentBufferOffset: number = 0;
-  private maxQueueMs: number = 60; // Ultra-low latency: 60ms max buffer
+  private maxQueueMs: number = 60;
 
   constructor() {
     super();
-    console.log("[AudioWorklet] Processor instantiated");
 
-    // Listen for messages from the main thread
     this.port.onmessage = (event) => {
       const message: AudioMessage = event.data;
 
@@ -94,7 +90,6 @@ class WebRTCAudioWorkletProcessor extends AudioWorkletProcessor {
     const channels = this.channels;
     const maxQueueSamples = (this.maxQueueMs / 1000) * this.sampleRate;
 
-    // Drop old samples if queue is too large
     while (this.queuedSamples > maxQueueSamples && this.queue.length > 0) {
       const dropped = this.queue.shift();
       if (dropped) {
@@ -102,7 +97,6 @@ class WebRTCAudioWorkletProcessor extends AudioWorkletProcessor {
       }
     }
 
-    // Add new samples
     this.queue.push(samples);
     this.queuedSamples += samples.length / channels;
   }
@@ -125,7 +119,6 @@ class WebRTCAudioWorkletProcessor extends AudioWorkletProcessor {
     let outputOffset = 0;
 
     while (outputOffset < bufferSize) {
-      // Get next buffer from queue if needed
       if (
         !this.currentBuffer ||
         this.currentBufferOffset >= this.currentBuffer.length
@@ -141,7 +134,6 @@ class WebRTCAudioWorkletProcessor extends AudioWorkletProcessor {
       }
 
       if (this.currentBuffer) {
-        // Copy samples from current buffer to output
         const samplesAvailable =
           (this.currentBuffer.length - this.currentBufferOffset) / channels;
         const samplesNeeded = bufferSize - outputOffset;
@@ -161,7 +153,6 @@ class WebRTCAudioWorkletProcessor extends AudioWorkletProcessor {
         this.currentBufferOffset += samplesToCopy * channels;
         outputOffset += samplesToCopy;
       } else {
-        // No data available - output silence
         for (let i = outputOffset; i < bufferSize; i++) {
           outputL[i] = 0;
           if (outputR) outputR[i] = 0;
@@ -170,10 +161,8 @@ class WebRTCAudioWorkletProcessor extends AudioWorkletProcessor {
       }
     }
 
-    // Keep processor alive
     return true;
   }
 }
 
-// Register the processor
 registerProcessor("webrtc-audio-processor", WebRTCAudioWorkletProcessor);
