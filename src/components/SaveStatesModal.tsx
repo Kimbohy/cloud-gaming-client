@@ -203,11 +203,11 @@ export function SaveStatesModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[82vh] overflow-y-auto border border-slate-800/70 bg-slate-950/80 backdrop-blur-xl text-slate-100">
+      <DialogContent className="max-w-3xl max-h-[82vh] sm:max-h-[90vh] overflow-y-auto border border-slate-800/70 bg-slate-950/80 backdrop-blur-xl text-slate-100">
         <DialogHeader className="pb-2">
-          <DialogTitle className="flex items-center gap-2 text-lg font-semibold text-slate-50">
-            <Save className="w-5 h-5 text-amber-400" />
-            Save States · {romName}
+          <DialogTitle className="flex items-center gap-2 text-base sm:text-lg font-semibold text-slate-50">
+            <Save className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />
+            <span className="truncate">Save States · {romName}</span>
           </DialogTitle>
           <p className="text-xs text-slate-400">
             Store and reload snapshots for this session.
@@ -216,7 +216,7 @@ export function SaveStatesModal({
         <DialogPanel>
           <div className="space-y-4">
             {/* Quick Save */}
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 shadow-[0_10px_40px_-24px] shadow-amber-500/40">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 sm:px-4 py-2 sm:py-3 shadow-[0_10px_40px_-24px] shadow-amber-500/40">
               <div>
                 <div className="text-sm font-semibold text-amber-100">
                   Quick Save
@@ -228,7 +228,7 @@ export function SaveStatesModal({
               <Button
                 onClick={handleQuickSave}
                 disabled={actionLoading !== null}
-                className="min-w-[140px] bg-amber-500 text-slate-950 hover:bg-amber-400"
+                className="min-w-full sm:min-w-[140px] bg-amber-500 text-slate-950 hover:bg-amber-400"
               >
                 {actionLoading?.startsWith("save-") ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -252,13 +252,13 @@ export function SaveStatesModal({
                   return (
                     <div
                       key={slotNumber}
-                      className={`group rounded-xl border border-slate-800/70 bg-slate-900/60 p-3 shadow-[0_10px_30px_-25px] shadow-black/80 transition-colors hover:border-amber-500/50 ${
+                      className={`group rounded-xl border border-slate-800/70 bg-slate-900/60 p-2 sm:p-3 shadow-[0_10px_30px_-25px] shadow-black/80 transition-colors hover:border-amber-500/50 ${
                         state ? "" : "border-dashed"
                       }`}
                     >
-                      <div className="flex items-start gap-3">
+                      <div className="flex items-start gap-2 sm:gap-3">
                         {/* Thumbnail */}
-                        <div className="w-20 h-20 bg-slate-950 rounded-lg shrink-0 overflow-hidden border border-slate-800">
+                        <div className="w-16 h-16 sm:w-20 sm:h-20 bg-slate-950 rounded-lg shrink-0 overflow-hidden border border-slate-800">
                           {state && thumbnails[state.id] ? (
                             <img
                               src={thumbnails[state.id]}
@@ -275,33 +275,33 @@ export function SaveStatesModal({
                         {/* Info */}
                         <div className="flex-1 min-w-0 space-y-1">
                           {isEditing ? (
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1 sm:gap-1.5">
                               <Input
                                 value={editName}
                                 onChange={(e) => setEditName(e.target.value)}
-                                className="h-8 text-sm dark"
+                                className="h-7 sm:h-8 text-xs sm:text-sm dark"
                                 autoFocus
                               />
                               <Button
                                 size="icon"
                                 variant="secondary"
-                                className="h-8 w-8 text-emerald-400"
+                                className="h-7 w-7 sm:h-8 sm:w-8 text-emerald-400"
                                 onClick={handleConfirmRename}
                               >
-                                <Check className="w-4 h-4" />
+                                <Check className="w-3 h-3 sm:w-4 sm:h-4" />
                               </Button>
                               <Button
                                 size="icon"
                                 variant="secondary"
-                                className="h-8 w-8 text-slate-300"
+                                className="h-7 w-7 sm:h-8 sm:w-8 text-slate-300"
                                 onClick={handleCancelRename}
                               >
-                                <X className="w-4 h-4" />
+                                <X className="w-3 h-3 sm:w-4 sm:h-4" />
                               </Button>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-2 text-sm font-semibold text-slate-50">
-                              <span className="inline-flex h-5 items-center rounded-full bg-slate-800 px-2 text-[11px] font-mono text-slate-300">
+                            <div className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm font-semibold text-slate-50">
+                              <span className="inline-flex h-4 sm:h-5 items-center rounded-full bg-slate-800 px-1.5 sm:px-2 text-[10px] sm:text-[11px] font-mono text-slate-300">
                                 Slot {slotNumber + 1}
                               </span>
                               <span className="truncate text-slate-100">
@@ -317,53 +317,56 @@ export function SaveStatesModal({
                           </div>
 
                           {/* Actions */}
-                          <div className="flex items-center gap-2 pt-1">
+                          <div className="flex items-center gap-1 sm:gap-2 pt-1 flex-wrap">
                             {state ? (
                               <>
                                 <Button
                                   size="sm"
                                   variant="secondary"
-                                  className="h-8 text-xs bg-slate-800 text-slate-100 hover:bg-slate-700"
+                                  className="h-7 sm:h-8 text-[10px] sm:text-xs bg-slate-800 text-slate-100 hover:bg-slate-700"
                                   onClick={() => handleLoadState(state)}
                                   disabled={isBusy}
                                 >
                                   {actionLoading === `load-${state.id}` ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    <Loader2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin" />
                                   ) : (
-                                    <Download className="w-3.5 h-3.5 mr-1" />
+                                    <Download className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1" />
                                   )}
                                   Load
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="secondary"
-                                  className="h-8 text-xs border-slate-700 text-slate-100 hover:border-amber-500/70"
+                                  className="h-7 sm:h-8 text-[10px] sm:text-xs border-slate-700 text-slate-100 hover:border-amber-500/70"
                                   onClick={() => handleSaveToSlot(slotNumber)}
                                   disabled={isBusy}
                                 >
-                                  <Save className="w-3.5 h-3.5 mr-1" />
-                                  Overwrite
+                                  <Save className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1" />
+                                  <span className="hidden sm:inline">
+                                    Overwrite
+                                  </span>
+                                  <span className="sm:hidden">Save</span>
                                 </Button>
                                 <Button
                                   size="icon"
                                   variant="secondary"
-                                  className="h-8 w-8 text-slate-300"
+                                  className="h-7 w-7 sm:h-8 sm:w-8 text-slate-300"
                                   onClick={() => handleStartRename(state)}
                                   disabled={isBusy}
                                 >
-                                  <Edit2 className="w-3.5 h-3.5" />
+                                  <Edit2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                                 </Button>
                                 <Button
                                   size="icon"
                                   variant="secondary"
-                                  className="h-8 w-8 text-rose-400"
+                                  className="h-7 w-7 sm:h-8 sm:w-8 text-rose-400"
                                   onClick={() => handleDeleteState(state)}
                                   disabled={isBusy}
                                 >
                                   {actionLoading === `delete-${state.id}` ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    <Loader2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin" />
                                   ) : (
-                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                                   )}
                                 </Button>
                               </>
@@ -371,14 +374,14 @@ export function SaveStatesModal({
                               <Button
                                 size="sm"
                                 variant="secondary"
-                                className="h-8 text-xs border-slate-700 text-slate-200 hover:border-amber-500/70"
+                                className="h-7 sm:h-8 text-[10px] sm:text-xs border-slate-700 text-slate-200 hover:border-amber-500/70"
                                 onClick={() => handleSaveToSlot(slotNumber)}
                                 disabled={isBusy}
                               >
                                 {actionLoading === `save-${slotNumber}` ? (
-                                  <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                                  <Loader2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1 animate-spin" />
                                 ) : (
-                                  <Save className="w-3.5 h-3.5 mr-1" />
+                                  <Save className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1" />
                                 )}
                                 Save Here
                               </Button>
