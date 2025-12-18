@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type RefObject } from "react";
 
-export function useDevice() {
+export function useDevice(_containerRef?: RefObject<HTMLDivElement | null>) {
   const [isMobile, setIsMobile] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 

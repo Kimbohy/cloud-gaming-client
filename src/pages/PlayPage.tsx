@@ -1,7 +1,14 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  type RefObject,
+} from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useQueryState } from "nuqs";
+
+// API imports
 import {
   createGameSession,
   startGameSession,
@@ -15,7 +22,6 @@ import {
   type StreamMode,
   type KeyMappings,
   loadKeyMappings,
-  getKeyDisplayName,
 } from "@/api/play.api";
 import {
   WebRTCManager,
@@ -23,16 +29,24 @@ import {
   WebRTCAudioPlayer,
   setStreamMode as setServerStreamMode,
 } from "@/api/webrtc.api";
-import { useQueryState } from "nuqs";
+
+// Components
+import {
+  GameCanvas,
+  GameControlBar,
+  GameError,
+  GameHeader,
+  GameFooter,
+  MobileVirtualController,
+  MobileFullscreenView,
+  DesktopSidePanel,
+} from "@/components/game";
 import { ControlsConfigDialog } from "@/components/ControlsConfigDialog";
 import { SaveStatesModal } from "@/components/SaveStatesModal";
-import {
-  listSaveStates,
-  saveState,
-  loadStateById,
-  base64ToArrayBuffer,
-  type SaveStateMetadata,
-} from "@/api/saveStates.api";
+// import { Button } from "@/components/ui/button";
+
+// Hooks
+import { useDevice, useFullscreen, useSaveStates } from "@/hooks";
 
 interface ErrorState {
   message: string;
@@ -43,6 +57,7 @@ export default function PlayPage() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // Game data from route
   const gameData = location.state as {
     name: string;
     rom: string;
@@ -50,32 +65,28 @@ export default function PlayPage() {
   };
   const romId = location.pathname.split("/play/")[1];
 
+  // Query state
   const [name, setName] = useQueryState("name");
   const [rom, setRom] = useQueryState("rom", { defaultValue: "" });
   const [desc, setDesc] = useQueryState("desc");
 
+  // Session state
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("Ready");
   const [error, setError] = useState<ErrorState | null>(null);
   const [connected, setConnected] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showControls, setShowControls] = useState(true);
 
+  // Stream mode
   const [streamMode, setStreamMode] = useState<StreamMode>("websocket");
 
+  // UI state
+  const [showControls, setShowControls] = useState(true);
   const [showControlsConfig, setShowControlsConfig] = useState(false);
-  const [keyMappings, setKeyMappings] = useState<KeyMappings>(loadKeyMappings);
-
   const [showSaveStatesModal, setShowSaveStatesModal] = useState(false);
   const [showInlineSavePanel, setShowInlineSavePanel] = useState(false);
-  const [inlineSaveStates, setInlineSaveStates] = useState<SaveStateMetadata[]>(
-    []
-  );
-  const [inlineSaveLoading, setInlineSaveLoading] = useState<string | null>(
-    null
-  );
+  const [keyMappings, setKeyMappings] = useState<KeyMappings>(loadKeyMappings);
 
+  // Refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameContainerRef = useRef<HTMLDivElement>(null);
   const socketManagerRef = useRef<GameSocketManager>(new GameSocketManager());
@@ -84,7 +95,6 @@ export default function PlayPage() {
   const inputManagerRef = useRef<GameInputManager>(
     new GameInputManager(socketManagerRef.current)
   );
-
   const webrtcManagerRef = useRef<WebRTCManager>(new WebRTCManager());
   const webrtcVideoRendererRef = useRef<WebRTCVideoRenderer>(
     new WebRTCVideoRenderer()
@@ -93,11 +103,29 @@ export default function PlayPage() {
     new WebRTCAudioPlayer()
   );
 
+  // Custom hooks
+  const { isMobile, isFullscreen } = useDevice(gameContainerRef);
+  const { toggleFullscreen } = useFullscreen(
+    gameContainerRef as RefObject<HTMLDivElement>
+  );
+  const {
+    saveStates: inlineSaveStates,
+    loading: inlineSaveLoading,
+    loadSaveStates: loadInlineSaveStates,
+    quickSave: handleInlineQuickSave,
+    saveToSlot: handleInlineSaveToSlot,
+    loadFromSlot: handleInlineLoadState,
+  } = useSaveStates(romId);
+
+  const isPlaying = status === "Playing";
+
+  // Audio resume helper
   const resumeAudio = useCallback(() => {
     audioManagerRef.current.resume?.();
     webrtcAudioPlayerRef.current.resume();
   }, []);
 
+  // Input handler
   const sendInput = useCallback(
     (button: InputButton, state: "down" | "up") => {
       if (!sessionId) return;
@@ -116,58 +144,23 @@ export default function PlayPage() {
     [sessionId, streamMode, resumeAudio]
   );
 
+  // Close inline save panel when exiting fullscreen
   useEffect(() => {
-    const checkDevice = () => {
-      const mobile = window.innerWidth < 1024 || "ontouchstart" in window;
-      setIsMobile(mobile);
-    };
-
-    checkDevice();
-    window.addEventListener("resize", checkDevice);
-    return () => window.removeEventListener("resize", checkDevice);
-  }, []);
-
-  const toggleFullscreen = useCallback(async () => {
-    if (!gameContainerRef.current) return;
-
-    try {
-      if (!document.fullscreenElement) {
-        await gameContainerRef.current.requestFullscreen();
-        setIsFullscreen(true);
-        try {
-          await (screen.orientation as any).lock?.("landscape");
-        } catch {}
-      } else {
-        await document.exitFullscreen();
-        setIsFullscreen(false);
-      }
-    } catch (err) {
-      console.error("Fullscreen error:", err);
+    if (!isFullscreen) {
+      setShowInlineSavePanel(false);
     }
-  }, []);
+  }, [isFullscreen]);
 
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      const isNowFullscreen = !!document.fullscreenElement;
-      setIsFullscreen(isNowFullscreen);
-      // Close inline save panel when exiting fullscreen
-      if (!isNowFullscreen) {
-        setShowInlineSavePanel(false);
-      }
-    };
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () =>
-      document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, []);
-
+  // Set game data from route
   useEffect(() => {
     if (gameData) {
       setName(gameData.name);
       setRom(gameData.rom);
       setDesc(gameData.desc);
     }
-  }, [gameData]);
+  }, [gameData, setName, setRom, setDesc]);
 
+  // Initialize managers
   useEffect(() => {
     audioManagerRef.current.initialize();
     if (canvasRef.current) {
@@ -201,7 +194,6 @@ export default function PlayPage() {
     }
 
     const webrtcManager = webrtcManagerRef.current;
-
     webrtcManager.connect();
 
     webrtcManager.onVideoTrack((stream) => {
@@ -231,6 +223,7 @@ export default function PlayPage() {
     };
   }, []);
 
+  // Reinitialize canvas on fullscreen change
   useEffect(() => {
     if (canvasRef.current) {
       canvasManagerRef.current.initialize(canvasRef.current);
@@ -238,6 +231,7 @@ export default function PlayPage() {
     }
   }, [isFullscreen]);
 
+  // Setup keyboard controls
   useEffect(() => {
     inputManagerRef.current.setSessionId(sessionId);
     if (sessionId) {
@@ -246,11 +240,20 @@ export default function PlayPage() {
     return () => inputManagerRef.current.cleanup();
   }, [sessionId]);
 
+  // Load save states when inline panel opens
+  useEffect(() => {
+    if (showInlineSavePanel) {
+      loadInlineSaveStates();
+    }
+  }, [showInlineSavePanel, loadInlineSaveStates]);
+
+  // Key mappings handler
   const handleKeyMappingsChange = useCallback((newMappings: KeyMappings) => {
     setKeyMappings(newMappings);
     inputManagerRef.current.updateKeyMappings(newMappings);
   }, []);
 
+  // Session management
   const createSession = async () => {
     try {
       setError(null);
@@ -291,16 +294,6 @@ export default function PlayPage() {
     }
   };
 
-  const startEmulation = async () => {
-    if (!sessionId) {
-      const newSessionId = await createSession();
-      if (!newSessionId) return;
-      await startSession(newSessionId);
-    } else {
-      await startSession(sessionId);
-    }
-  };
-
   const startSession = async (sid: string) => {
     try {
       setStatus("Starting...");
@@ -320,6 +313,37 @@ export default function PlayPage() {
     }
   };
 
+  const startEmulation = async () => {
+    if (!sessionId) {
+      const newSessionId = await createSession();
+      if (!newSessionId) return;
+      await startSession(newSessionId);
+    } else {
+      await startSession(sessionId);
+    }
+  };
+
+  const stopEmulation = async () => {
+    if (!sessionId) return;
+    try {
+      setStatus("Stopping...");
+      await stopGameSession(sessionId);
+      setSessionId(null);
+      setStatus("Ready");
+    } catch (err) {
+      if (err instanceof PlayApiError) {
+        setError({ message: err.message, isNetworkError: err.isNetworkError });
+      } else {
+        setError({
+          message:
+            err instanceof Error ? err.message : "Failed to stop emulation",
+          isNetworkError: false,
+        });
+      }
+    }
+  };
+
+  // Session ready helper
   const ensureSessionReady = useCallback(async (): Promise<string | null> => {
     let sid = sessionId;
 
@@ -340,8 +364,9 @@ export default function PlayPage() {
     }
 
     return sid;
-  }, [sessionId, status, createSession, startSession]);
+  }, [sessionId, status]);
 
+  // Array buffer to base64 helper
   const arrayBufferToBase64Safe = useCallback((buffer: ArrayBuffer) => {
     const bytes = new Uint8Array(buffer);
     const chunkSize = 0x8000;
@@ -353,6 +378,7 @@ export default function PlayPage() {
     return btoa(binary);
   }, []);
 
+  // Save state handlers
   const handleSaveState = useCallback(async (): Promise<{
     stateData: string;
     thumbnail: string | null;
@@ -376,7 +402,7 @@ export default function PlayPage() {
         }
       });
     });
-  }, [sessionId]);
+  }, [ensureSessionReady]);
 
   const handleLoadState = useCallback(
     async (stateData: ArrayBuffer): Promise<boolean> => {
@@ -394,6 +420,7 @@ export default function PlayPage() {
     [ensureSessionReady, arrayBufferToBase64Safe]
   );
 
+  // Stream mode handler
   const handleStreamModeChange = useCallback(
     async (newMode: StreamMode) => {
       setStreamMode(newMode);
@@ -413,8 +440,7 @@ export default function PlayPage() {
           const webrtcSuccess = await webrtcManagerRef.current.createSession(
             sessionId
           );
-          if (webrtcSuccess) {
-          } else {
+          if (!webrtcSuccess) {
             console.warn("WebRTC session creation failed during mode switch");
           }
         }
@@ -423,1347 +449,199 @@ export default function PlayPage() {
     [sessionId]
   );
 
-  const stopEmulation = async () => {
-    if (!sessionId) return;
-    try {
-      setStatus("Stopping...");
-      await stopGameSession(sessionId);
-      setSessionId(null);
-      setStatus("Ready");
-    } catch (err) {
-      if (err instanceof PlayApiError) {
-        setError({ message: err.message, isNetworkError: err.isNetworkError });
-      } else {
-        setError({
-          message:
-            err instanceof Error ? err.message : "Failed to stop emulation",
-          isNetworkError: false,
-        });
-      }
-    }
-  };
-
-  // Inline save panel functions for fullscreen mode
-  const loadInlineSaveStates = useCallback(async () => {
-    if (!romId) return;
-    try {
-      const states = await listSaveStates(romId);
-      setInlineSaveStates(states);
-    } catch (error) {
-      console.error("Failed to load save states:", error);
-    }
-  }, [romId]);
-
-  const handleInlineQuickSave = async () => {
-    if (!romId) return;
-    setInlineSaveLoading("quick-save");
-    try {
-      const result = await handleSaveState();
-      if (!result) {
-        console.error("Failed to capture state");
-        return;
-      }
-      const usedSlots = new Set(inlineSaveStates.map((s) => s.slotNumber));
-      let nextSlot = 0;
-      for (let i = 0; i < 10; i++) {
-        if (!usedSlots.has(i)) {
-          nextSlot = i;
-          break;
-        }
-      }
-      const stateData = base64ToArrayBuffer(result.stateData);
-      const thumbnail = result.thumbnail
-        ? base64ToArrayBuffer(result.thumbnail)
-        : undefined;
-      await saveState({ romId, slotNumber: nextSlot, stateData, thumbnail });
-      await loadInlineSaveStates();
-    } catch (error) {
-      console.error("Failed to save:", error);
-    } finally {
-      setInlineSaveLoading(null);
-    }
-  };
-
-  const handleInlineLoadState = async (state: SaveStateMetadata) => {
-    setInlineSaveLoading(`load-${state.id}`);
-    try {
-      const stateData = await loadStateById(state.id);
-      await handleLoadState(stateData);
-      setShowInlineSavePanel(false);
-    } catch (error) {
-      console.error("Failed to load state:", error);
-    } finally {
-      setInlineSaveLoading(null);
-    }
-  };
-
-  const handleInlineSaveToSlot = async (slotNumber: number) => {
-    if (!romId) return;
-    setInlineSaveLoading(`save-${slotNumber}`);
-    try {
-      const result = await handleSaveState();
-      if (!result) return;
-      const stateData = base64ToArrayBuffer(result.stateData);
-      const thumbnail = result.thumbnail
-        ? base64ToArrayBuffer(result.thumbnail)
-        : undefined;
-      await saveState({ romId, slotNumber, stateData, thumbnail });
-      await loadInlineSaveStates();
-    } catch (error) {
-      console.error("Failed to save:", error);
-    } finally {
-      setInlineSaveLoading(null);
-    }
-  };
-
-  // Load save states when inline panel opens
-  useEffect(() => {
-    if (showInlineSavePanel) {
-      loadInlineSaveStates();
-    }
-  }, [showInlineSavePanel, loadInlineSaveStates]);
-
-  const isPlaying = status === "Playing";
-
-  const TouchButton = ({
-    button,
-    children,
-    className,
-  }: {
-    button: InputButton;
-    children: React.ReactNode;
-    className: string;
-  }) => (
-    <button
-      onTouchStart={(e) => {
-        e.preventDefault();
-        sendInput(button, "down");
-      }}
-      onTouchEnd={(e) => {
-        e.preventDefault();
-        sendInput(button, "up");
-      }}
-      onMouseDown={() => sendInput(button, "down")}
-      onMouseUp={() => sendInput(button, "up")}
-      onMouseLeave={() => sendInput(button, "up")}
-      className={className}
-    >
-      {children}
-    </button>
-  );
-
-  if (isMobile && isFullscreen) {
-    return (
-      <div
-        ref={gameContainerRef}
-        className="fixed inset-0 bg-black flex items-center justify-center touch-none select-none"
-      >
-        <div className="relative h-full aspect-3/2 max-w-full">
-          <canvas
-            ref={canvasRef}
-            width={240}
-            height={160}
-            className="w-full h-full"
-            style={{ imageRendering: "pixelated" }}
-          />
-
-          <div className="absolute inset-0 opacity-[0.02] pointer-events-none bg-[linear-gradient(transparent_50%,rgba(0,0,0,0.5)_50%)] bg-size-[100%_4px]" />
-        </div>
-
-        {showControls && (
-          <>
-            {/* Left Side - D-Pad */}
-            <div className="absolute left-4 bottom-1/2 translate-y-1/2 md:left-8">
-              <div className="relative w-32 h-32 md:w-40 md:h-40">
-                <TouchButton
-                  button="UP"
-                  className="absolute top-0 left-1/2 -translate-x-1/2 w-10 h-10 md:w-12 md:h-12 bg-slate-800/80 active:bg-cyan-600 rounded-t-xl flex items-center justify-center border border-slate-600/50"
-                >
-                  <svg
-                    className="w-5 h-5 text-cyan-400"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path d="M12 4l-8 8h16z" />
-                  </svg>
-                </TouchButton>
-                <TouchButton
-                  button="DOWN"
-                  className="absolute bottom-0 left-1/2 -translate-x-1/2 w-10 h-10 md:w-12 md:h-12 bg-slate-800/80 active:bg-cyan-600 rounded-b-xl flex items-center justify-center border border-slate-600/50"
-                >
-                  <svg
-                    className="w-5 h-5 text-cyan-400"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path d="M12 20l8-8H4z" />
-                  </svg>
-                </TouchButton>
-                <TouchButton
-                  button="LEFT"
-                  className="absolute left-0 top-1/2 -translate-y-1/2 w-10 h-10 md:w-12 md:h-12 bg-slate-800/80 active:bg-cyan-600 rounded-l-xl flex items-center justify-center border border-slate-600/50"
-                >
-                  <svg
-                    className="w-5 h-5 text-cyan-400"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path d="M4 12l8-8v16z" />
-                  </svg>
-                </TouchButton>
-                <TouchButton
-                  button="RIGHT"
-                  className="absolute right-0 top-1/2 -translate-y-1/2 w-10 h-10 md:w-12 md:h-12 bg-slate-800/80 active:bg-cyan-600 rounded-r-xl flex items-center justify-center border border-slate-600/50"
-                >
-                  <svg
-                    className="w-5 h-5 text-cyan-400"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path d="M20 12l-8 8V4z" />
-                  </svg>
-                </TouchButton>
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 md:w-10 md:h-10 bg-slate-700/80 rounded-full border border-slate-600/50" />
-              </div>
-            </div>
-
-            {/* Right Side - Action Buttons */}
-            <div className="absolute right-4 bottom-1/2 translate-y-1/2 md:right-8">
-              <div className="relative w-28 h-28 md:w-36 md:h-36">
-                <TouchButton
-                  button="B"
-                  className="absolute left-0 bottom-0 w-12 h-12 md:w-14 md:h-14 bg-rose-600/90 active:bg-rose-500 rounded-full flex items-center justify-center text-white font-black text-lg md:text-xl shadow-lg shadow-rose-900/50 border-2 border-rose-400/30"
-                >
-                  B
-                </TouchButton>
-                <TouchButton
-                  button="A"
-                  className="absolute right-0 top-0 w-12 h-12 md:w-14 md:h-14 bg-fuchsia-600/90 active:bg-fuchsia-500 rounded-full flex items-center justify-center text-white font-black text-lg md:text-xl shadow-lg shadow-fuchsia-900/50 border-2 border-fuchsia-400/30"
-                >
-                  A
-                </TouchButton>
-              </div>
-            </div>
-
-            {/* Top Bar - L/R Shoulder + Menu */}
-            <div className="absolute top-0 left-0 right-0 flex justify-between items-start p-2 md:p-4">
-              <TouchButton
-                button="L"
-                className="w-16 h-8 md:w-20 md:h-10 bg-slate-700/80 active:bg-purple-600 rounded-b-xl text-slate-300 font-bold text-sm border border-slate-600/50"
-              >
-                L
-              </TouchButton>
-
-              <div className="flex items-center gap-2">
-                {/* Stream Mode Toggle */}
-                <button
-                  onClick={() =>
-                    handleStreamModeChange(
-                      streamMode === "websocket" ? "webrtc" : "websocket"
-                    )
-                  }
-                  className={`p-2 rounded-lg flex items-center gap-1 ${
-                    streamMode === "webrtc"
-                      ? "bg-green-600/80 text-green-300"
-                      : "bg-cyan-600/80 text-cyan-300"
-                  }`}
-                  title={`Mode: ${streamMode.toUpperCase()}`}
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    {streamMode === "webrtc" ? (
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"
-                      />
-                    ) : (
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M5 12h14M12 5l7 7-7 7"
-                      />
-                    )}
-                  </svg>
-                  <span className="text-[10px] font-bold">
-                    {streamMode === "webrtc" ? "RTC" : "WS"}
-                  </span>
-                </button>
-
-                {/* Save States Button - Opens inline panel */}
-                {rom && (
-                  <button
-                    onClick={() => setShowInlineSavePanel(!showInlineSavePanel)}
-                    className={`p-2 rounded-lg flex items-center gap-1 ${
-                      showInlineSavePanel
-                        ? "bg-amber-500 text-white"
-                        : "bg-amber-600/80 text-amber-300"
-                    }`}
-                    title="Save States"
-                  >
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
-                      />
-                    </svg>
-                    <span className="text-[10px] font-bold">SAVE</span>
-                  </button>
-                )}
-
-                <button
-                  onClick={() => setShowControls(false)}
-                  className="p-2 bg-slate-800/80 rounded-lg text-slate-400"
-                >
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
-                    />
-                  </svg>
-                </button>
-                <button
-                  onClick={toggleFullscreen}
-                  className="p-2 bg-slate-800/80 rounded-lg text-slate-400"
-                >
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
-
-              <TouchButton
-                button="R"
-                className="w-16 h-8 md:w-20 md:h-10 bg-slate-700/80 active:bg-purple-600 rounded-b-xl text-slate-300 font-bold text-sm border border-slate-600/50"
-              >
-                R
-              </TouchButton>
-            </div>
-
-            {/* Bottom Center - START/SELECT */}
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-4">
-              <TouchButton
-                button="SELECT"
-                className="px-4 py-1.5 bg-slate-700/80 active:bg-slate-600 rounded-full text-slate-300 text-xs font-bold border border-slate-600/50"
-              >
-                SELECT
-              </TouchButton>
-              <TouchButton
-                button="START"
-                className="px-4 py-1.5 bg-emerald-600/80 active:bg-emerald-500 rounded-full text-white text-xs font-bold border border-emerald-400/30"
-              >
-                START
-              </TouchButton>
-            </div>
-          </>
-        )}
-
-        {/* Inline Save States Panel - Fullscreen Mode */}
-        {showInlineSavePanel && rom && (
-          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-slate-900/95 border border-slate-700 rounded-2xl p-4 max-w-md w-full mx-4 max-h-[80vh] overflow-y-auto">
-              {/* Header */}
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-white font-bold flex items-center gap-2">
-                  <svg
-                    className="w-5 h-5 text-amber-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
-                    />
-                  </svg>
-                  Save States
-                </h3>
-                <button
-                  onClick={() => setShowInlineSavePanel(false)}
-                  className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400"
-                >
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
-
-              {/* Quick Save Button */}
-              <button
-                onClick={handleInlineQuickSave}
-                disabled={inlineSaveLoading !== null}
-                className="w-full mb-4 p-3 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded-xl text-white font-bold flex items-center justify-center gap-2"
-              >
-                {inlineSaveLoading === "quick-save" ? (
-                  <svg
-                    className="w-5 h-5 animate-spin"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    />
-                  </svg>
-                ) : (
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
-                    />
-                  </svg>
-                )}
-                Quick Save
-              </button>
-
-              {/* Save Slots */}
-              <div className="space-y-2">
-                {[0, 1, 2, 3, 4].map((slotNumber) => {
-                  const state = inlineSaveStates.find(
-                    (s) => s.slotNumber === slotNumber
-                  );
-                  const isLoading =
-                    inlineSaveLoading === `load-${state?.id}` ||
-                    inlineSaveLoading === `save-${slotNumber}`;
-
-                  return (
-                    <div
-                      key={slotNumber}
-                      className={`p-3 rounded-xl border ${
-                        state
-                          ? "bg-slate-800/80 border-slate-600"
-                          : "bg-slate-800/40 border-slate-700 border-dashed"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono text-slate-400 bg-slate-700 px-2 py-0.5 rounded">
-                              Slot {slotNumber + 1}
-                            </span>
-                            {state ? (
-                              <span className="text-sm text-white truncate">
-                                {state.name || "Save"}
-                              </span>
-                            ) : (
-                              <span className="text-sm text-slate-500">
-                                Empty
-                              </span>
-                            )}
-                          </div>
-                          {state && (
-                            <div className="text-[10px] text-slate-500 mt-1">
-                              {new Date(state.lastUsedAt).toLocaleString()}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2 ml-2">
-                          {state && (
-                            <button
-                              onClick={() => handleInlineLoadState(state)}
-                              disabled={isLoading}
-                              className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 rounded-lg text-white text-xs font-bold flex items-center gap-1"
-                            >
-                              {inlineSaveLoading === `load-${state.id}` ? (
-                                <svg
-                                  className="w-3 h-3 animate-spin"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <circle
-                                    className="opacity-25"
-                                    cx="12"
-                                    cy="12"
-                                    r="10"
-                                    stroke="currentColor"
-                                    strokeWidth="4"
-                                  />
-                                  <path
-                                    className="opacity-75"
-                                    fill="currentColor"
-                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                                  />
-                                </svg>
-                              ) : (
-                                <svg
-                                  className="w-3 h-3"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                                  />
-                                </svg>
-                              )}
-                              Load
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleInlineSaveToSlot(slotNumber)}
-                            disabled={isLoading}
-                            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded-lg text-white text-xs font-bold flex items-center gap-1"
-                          >
-                            {inlineSaveLoading === `save-${slotNumber}` ? (
-                              <svg
-                                className="w-3 h-3 animate-spin"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                              >
-                                <circle
-                                  className="opacity-25"
-                                  cx="12"
-                                  cy="12"
-                                  r="10"
-                                  stroke="currentColor"
-                                  strokeWidth="4"
-                                />
-                                <path
-                                  className="opacity-75"
-                                  fill="currentColor"
-                                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                                />
-                              </svg>
-                            ) : (
-                              <svg
-                                className="w-3 h-3"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
-                                />
-                              </svg>
-                            )}
-                            Save
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Hidden controls toggle */}
-        {!showControls && (
-          <button
-            onClick={() => setShowControls(true)}
-            className="absolute top-4 right-4 p-2 bg-slate-800/60 rounded-lg text-slate-400"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-              />
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-              />
-            </svg>
-          </button>
-        )}
-      </div>
-    );
-  }
-
+  // Single container that stays in the DOM - content changes based on fullscreen state
   return (
     <div
       ref={gameContainerRef}
-      className={`bg-linear-to-br from-slate-950 via-purple-950 to-slate-950 ${
-        isMobile ? "h-dvh overflow-hidden flex flex-col" : "min-h-screen"
-      }`}
+      className={
+        isMobile && isFullscreen
+          ? "fixed inset-0 bg-black flex items-center justify-center touch-none select-none"
+          : `bg-linear-to-br from-slate-950 via-purple-950 to-slate-950 ${
+              isMobile
+                ? "h-dvh w-full overflow-x-hidden overflow-y-auto flex flex-col"
+                : "min-h-screen"
+            }`
+      }
     >
-      {/* Animated Background - Hidden on mobile for performance */}
-      {!isMobile && (
-        <div className="fixed inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-20 left-10 w-72 h-72 bg-purple-500/10 rounded-full blur-3xl animate-pulse" />
-          <div
-            className="absolute bottom-20 right-10 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse"
-            style={{ animationDelay: "1s" }}
-          />
-        </div>
-      )}
-
-      <div
-        className={`relative mx-auto max-w-6xl ${
-          isMobile
-            ? " h-screen flex flex-col items-center px-3 py-8 min-h-0"
-            : "container px-4 py-4 md:py-8"
-        }`}
-      >
-        {/* Header - Compact on mobile */}
-        <div
-          className={`shrink-0 w-full ${
-            isMobile ? "mb-1 flex flex-col gap-5 " : "mb-4 md:mb-8"
-          }`}
-        >
-          <button
-            onClick={() => navigate("/roms")}
-            className={`group inline-flex items-center gap-2 text-slate-400 hover:text-white transition-colors ${
-              isMobile ? "hidden" : "mb-4 md:mb-6"
-            }`}
-          >
-            <svg
-              className="w-5 h-5 transform group-hover:-translate-x-1 transition-transform"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-            <span className="font-mono text-sm">Back to Library</span>
-          </button>
-
-          {/* Hide badges on mobile, show compact info */}
-          {isMobile ? (
-            <div className="flex items-center justify-between">
-              <h1 className="text-base font-bold text-white truncate flex-1 mr-2">
-                {name}
-              </h1>
-              <span
-                className={`w-2 h-2 rounded-full shrink-0 ${
-                  connected ? "bg-green-400" : "bg-red-400"
-                }`}
-              />
-            </div>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-center gap-2 md:gap-3 mb-2 md:mb-4">
-                <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/50 px-2 md:px-3 py-1 text-[10px] md:text-xs font-mono uppercase tracking-wider">
-                  🎮 Now Playing
-                </Badge>
-                <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-500/50 px-2 md:px-3 py-1 text-[10px] md:text-xs font-mono uppercase tracking-wider">
-                  {desc}
-                </Badge>
-                <div className="flex items-center gap-2 ml-auto">
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      connected ? "bg-green-400 animate-pulse" : "bg-red-400"
-                    }`}
-                  />
-                  <span
-                    className={`text-[10px] md:text-xs font-mono ${
-                      connected ? "text-green-400" : "text-red-400"
-                    }`}
-                  >
-                    {connected ? "CONNECTED" : "OFFLINE"}
-                  </span>
-                </div>
-              </div>
-
-              <h1 className="text-2xl md:text-4xl font-black tracking-tight">
-                <span className="bg-linear-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
-                  {name}
-                </span>
-              </h1>
-            </>
-          )}
-        </div>
-
-        {/* Error */}
-        {error && (
-          <div className="mb-4 md:mb-6 p-3 md:p-4 bg-red-950/50 border border-red-500/50 rounded-xl backdrop-blur-sm">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-xl">
-                {error.isNetworkError ? "🔌" : "❌"}
-              </span>
-              <span className="text-red-400 font-bold text-sm">
-                {error.isNetworkError ? "Erreur de connexion" : "Erreur"}
-              </span>
-            </div>
-            <p className="text-red-300 text-xs md:text-sm font-mono">
-              {error.message}
-            </p>
-            {error.isNetworkError && (
-              <p className="text-slate-400 text-xs mt-2">
-                Vérifiez que le serveur est démarré avec:{" "}
-                <code className="bg-slate-800 px-1 rounded">
-                  cd server && pnpm start:dev
-                </code>
-              </p>
-            )}
+      {/* Mobile Fullscreen Content */}
+      {isMobile && isFullscreen ? (
+        <>
+          <div className="relative h-full aspect-3/2 max-w-full">
+            <canvas
+              ref={canvasRef}
+              width={240}
+              height={160}
+              className="w-full h-full"
+              style={{ imageRendering: "pixelated" }}
+            />
+            <div className="absolute inset-0 opacity-[0.02] pointer-events-none bg-[linear-gradient(transparent_50%,rgba(0,0,0,0.5)_50%)] bg-size-[100%_4px]" />
           </div>
-        )}
 
-        {/* Main Content - Responsive Grid */}
-        <div
-          className={`${
-            isMobile
-              ? "flex flex-col pt-10 gap-1.5 w-full max-w-md"
-              : "grid lg:grid-cols-4 gap-4 md:gap-6"
-          }`}
-        >
-          {/* Game Screen */}
+          {showControls && (
+            <MobileFullscreenView
+              showControls={showControls}
+              showInlineSavePanel={showInlineSavePanel}
+              streamMode={streamMode}
+              hasRom={!!rom}
+              saveStates={inlineSaveStates}
+              saveLoading={inlineSaveLoading}
+              onInput={sendInput}
+              onToggleControls={setShowControls}
+              onToggleFullscreen={toggleFullscreen}
+              onToggleInlineSavePanel={() =>
+                setShowInlineSavePanel(!showInlineSavePanel)
+              }
+              onStreamModeChange={() =>
+                handleStreamModeChange(
+                  streamMode === "websocket" ? "webrtc" : "websocket"
+                )
+              }
+              onQuickSave={() => handleInlineQuickSave(handleSaveState)}
+              onLoadState={(state) =>
+                handleInlineLoadState(state, handleLoadState)
+              }
+              onSaveToSlot={(slot) =>
+                handleInlineSaveToSlot(slot, handleSaveState)
+              }
+            />
+          )}
+
+          {/* Tap to toggle controls */}
+          {!showControls && (
+            <button
+              className="absolute inset-0 z-10"
+              onClick={() => setShowControls(true)}
+              aria-label="Show controls"
+            />
+          )}
+        </>
+      ) : (
+        <>
+          {/* Animated Background - Hidden on mobile for performance */}
+          {!isMobile && (
+            <div className="fixed inset-0 overflow-hidden pointer-events-none">
+              <div className="absolute top-20 left-10 w-72 h-72 bg-purple-500/10 rounded-full blur-3xl animate-pulse" />
+              <div
+                className="absolute bottom-20 right-10 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse"
+                style={{ animationDelay: "1s" }}
+              />
+            </div>
+          )}
+
           <div
-            className={`lg:col-span-3 ${
-              isMobile ? "flex flex-col w-full z-10" : "space-y-4"
+            className={`relative mx-auto ${
+              isMobile
+                ? "w-full flex flex-col px-3 py-4"
+                : "container max-w-6xl px-4 py-4 md:py-8"
             }`}
           >
+            {/* Header */}
             <div
-              className={`relative bg-slate-900/50 border border-slate-700/50 backdrop-blur-sm overflow-hidden ${
-                isMobile ? "shrink-0 rounded-lg p-1.5 pb-2" : "rounded-2xl"
+              className={`shrink-0 w-full ${
+                isMobile ? "mb-3" : "mb-4 md:mb-8"
               }`}
             >
-              {/* Game Canvas Container */}
-              <div className={isMobile ? "" : "p-3 md:p-6"}>
-                <div className="relative bg-black rounded-xl overflow-hidden border-2 border-slate-800">
-                  {/* Scanline Effect */}
-                  <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[linear-gradient(transparent_50%,rgba(0,0,0,0.5)_50%)] bg-size-[100%_4px] z-10" />
-
-                  {/* Power LED */}
-                  <div className="absolute top-2 right-2 md:top-3 md:right-3 z-20">
-                    <span
-                      className={`w-2 h-2 rounded-full block ${
-                        isPlaying
-                          ? "bg-green-400 shadow-[0_0_10px_rgba(74,222,128,0.8)]"
-                          : "bg-slate-600"
-                      }`}
-                    />
-                  </div>
-
-                  <canvas
-                    ref={canvasRef}
-                    width={240}
-                    height={160}
-                    className="w-full h-auto block"
-                    style={{ imageRendering: "pixelated" }}
-                  />
-
-                  {/* Play Overlay */}
-                  {!isPlaying && (
-                    <div
-                      onClick={startEmulation}
-                      className="absolute inset-0 bg-slate-950/80 flex flex-col items-center justify-center z-10 cursor-pointer"
-                    >
-                      <div className="w-14 h-14 md:w-16 md:h-16 rounded-full bg-white/10 backdrop-blur-md border-2 border-white/20 flex items-center justify-center mb-3 md:mb-4 hover:scale-110 transition-transform">
-                        <svg
-                          className="w-7 h-7 md:w-8 md:h-8 text-white ml-1"
-                          fill="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
-                      </div>
-                      <span className="text-white font-bold text-base md:text-lg tracking-wide">
-                        PRESS START
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Control Bar */}
-                <div
-                  className={`${
-                    isMobile ? "mt-1.5" : "mt-3 md:mt-4"
-                  } flex items-center justify-between gap-2 md:gap-4`}
-                >
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      className={`font-mono text-[9px] md:text-xs px-1.5 py-0.5 ${
-                        isPlaying
-                          ? "bg-green-500/20 text-green-300 border-green-500/50"
-                          : status === "Error"
-                          ? "bg-red-500/20 text-red-300 border-red-500/50"
-                          : "bg-slate-500/20 text-slate-300 border-slate-500/50"
-                      }`}
-                    >
-                      {status.toUpperCase()}
-                    </Badge>
-                  </div>
-
-                  <div className="flex gap-1">
-                    {/* Stream Mode Toggle - Mobile */}
-                    {isMobile && (
-                      <Button
-                        onClick={() =>
-                          handleStreamModeChange(
-                            streamMode === "websocket" ? "webrtc" : "websocket"
-                          )
-                        }
-                        disabled={isPlaying}
-                        size="sm"
-                        className={`font-bold px-1.5 py-1 rounded h-6 ${
-                          streamMode === "webrtc"
-                            ? "bg-green-600 hover:bg-green-500"
-                            : "bg-cyan-600 hover:bg-cyan-500"
-                        } text-white disabled:opacity-40`}
-                        title={`Mode: ${streamMode.toUpperCase()}`}
-                      >
-                        <svg
-                          className="w-3 h-3"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          {streamMode === "webrtc" ? (
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-15.857 21.213 0"
-                            />
-                          ) : (
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M5 12h14M12 5l7 7-7 7"
-                            />
-                          )}
-                        </svg>
-                      </Button>
-                    )}
-
-                    {/* Save States Button - Mobile */}
-                    {isMobile && rom && (
-                      <Button
-                        onClick={() => setShowSaveStatesModal(true)}
-                        size="sm"
-                        className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-1.5 py-1 rounded h-6"
-                        title="Save States"
-                      >
-                        <svg
-                          className="w-3 h-3"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
-                          />
-                        </svg>
-                      </Button>
-                    )}
-
-                    {/* Fullscreen Button - Mobile */}
-                    {isMobile && sessionId && (
-                      <Button
-                        onClick={toggleFullscreen}
-                        size="sm"
-                        className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-1.5 py-1 rounded h-6"
-                      >
-                        <svg
-                          className="w-3 h-3"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
-                          />
-                        </svg>
-                      </Button>
-                    )}
-
-                    <Button
-                      onClick={startEmulation}
-                      disabled={!!sessionId}
-                      size="sm"
-                      className={`bg-green-600 hover:bg-green-500 text-white font-bold rounded disabled:opacity-40 ${
-                        isMobile ? "px-1.5 py-1 h-6" : "px-3 md:px-4 py-2"
-                      }`}
-                    >
-                      <svg
-                        className={isMobile ? "w-3.5 h-3.5" : "w-4 h-4 md:mr-2"}
-                        fill="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
-                      <span className="hidden md:inline">START</span>
-                    </Button>
-
-                    <Button
-                      onClick={stopEmulation}
-                      disabled={!sessionId}
-                      size="sm"
-                      className={`bg-red-600 hover:bg-red-500 text-white font-bold rounded disabled:opacity-40 ${
-                        isMobile ? "px-1.5 py-1 h-6" : "px-3 md:px-4 py-2"
-                      }`}
-                    >
-                      <svg
-                        className={isMobile ? "w-3 h-3" : "w-4 h-4 md:mr-2"}
-                        fill="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <rect x="6" y="6" width="12" height="12" rx="1" />
-                      </svg>
-                      <span className="hidden md:inline">STOP</span>
-                    </Button>
-                  </div>
-                </div>
-              </div>
+              <GameHeader
+                name={name || undefined}
+                desc={desc || undefined}
+                connected={connected}
+                isMobile={isMobile}
+                onBack={() => navigate("/roms")}
+              />
             </div>
 
-            {/* Mobile Virtual Controller (Portrait Mode) */}
-            {isMobile && sessionId && !isFullscreen && (
-              <div className="bg-slate-900/50 border border-slate-700/50 rounded-lg backdrop-blur-sm p-2 shrink-0 mt-8">
-                {/* L/R Buttons at top */}
-                <div className="flex justify-between mb-2">
-                  <TouchButton
-                    button="L"
-                    className="h-7 px-4 bg-slate-700 active:bg-purple-600 rounded text-[10px] font-bold text-slate-300"
-                  >
-                    L
-                  </TouchButton>
-                  <TouchButton
-                    button="R"
-                    className="h-7 px-4 bg-slate-700 active:bg-purple-600 rounded text-[10px] font-bold text-slate-300"
-                  >
-                    R
-                  </TouchButton>
-                </div>
+            {/* Error */}
+            {error && <GameError error={error} />}
 
-                <div className="flex items-center justify-between px-2">
-                  {/* D-Pad */}
-                  <div className="relative w-24 h-24">
-                    <TouchButton
-                      button="UP"
-                      className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-8 bg-slate-700 active:bg-cyan-600 rounded-t-lg flex items-center justify-center"
-                    >
-                      <svg
-                        className="w-3 h-3 text-cyan-300"
-                        fill="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path d="M12 4l-8 8h16z" />
-                      </svg>
-                    </TouchButton>
-                    <TouchButton
-                      button="DOWN"
-                      className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-8 bg-slate-700 active:bg-cyan-600 rounded-b-lg flex items-center justify-center"
-                    >
-                      <svg
-                        className="w-3 h-3 text-cyan-300"
-                        fill="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path d="M12 20l8-8H4z" />
-                      </svg>
-                    </TouchButton>
-                    <TouchButton
-                      button="LEFT"
-                      className="absolute left-0 top-1/2 -translate-y-1/2 w-8 h-8 bg-slate-700 active:bg-cyan-600 rounded-l-lg flex items-center justify-center"
-                    >
-                      <svg
-                        className="w-3 h-3 text-cyan-300"
-                        fill="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path d="M4 12l8-8v16z" />
-                      </svg>
-                    </TouchButton>
-                    <TouchButton
-                      button="RIGHT"
-                      className="absolute right-0 top-1/2 -translate-y-1/2 w-8 h-8 bg-slate-700 active:bg-cyan-600 rounded-r-lg flex items-center justify-center"
-                    >
-                      <svg
-                        className="w-3 h-3 text-cyan-300"
-                        fill="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path d="M20 12l-8 8V4z" />
-                      </svg>
-                    </TouchButton>
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-7 h-7 bg-slate-600 rounded-full" />
-                  </div>
-
-                  {/* Center Buttons */}
-                  <div className="flex flex-col gap-2">
-                    <TouchButton
-                      button="SELECT"
-                      className="h-5 px-3 bg-slate-700 active:bg-slate-600 rounded-full text-[9px] font-bold text-slate-300"
-                    >
-                      SELECT
-                    </TouchButton>
-                    <TouchButton
-                      button="START"
-                      className="h-5 px-3 bg-emerald-600 active:bg-emerald-500 rounded-full text-[9px] font-bold text-white"
-                    >
-                      START
-                    </TouchButton>
-                  </div>
-
-                  {/* Action Buttons - Fixed positioning to prevent overlap */}
-                  <div className="relative w-24 h-24">
-                    <TouchButton
-                      button="B"
-                      className="absolute left-0 bottom-2 w-10 h-10 bg-rose-600 active:bg-rose-500 rounded-full font-black text-sm text-white flex items-center justify-center shadow-lg"
-                    >
-                      B
-                    </TouchButton>
-                    <TouchButton
-                      button="A"
-                      className="absolute right-0 top-2 w-10 h-10 bg-fuchsia-600 active:bg-fuchsia-500 rounded-full font-black text-sm text-white flex items-center justify-center shadow-lg"
-                    >
-                      A
-                    </TouchButton>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Side Panel - Hidden on Mobile */}
-          <div className="hidden lg:block space-y-4">
-            {/* Controls Reference */}
-            <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl backdrop-blur-sm p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <svg
-                    className="w-4 h-4 text-purple-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
-                    />
-                  </svg>
-                  CONTROLS
-                </h3>
-                <button
-                  onClick={() => setShowControlsConfig(true)}
-                  className="p-1.5 bg-purple-600/30 hover:bg-purple-600/50 rounded-lg text-purple-300 transition-colors"
-                  title="Configurer les commandes"
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                    />
-                  </svg>
-                </button>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between p-2 bg-slate-800/50 rounded-lg">
-                  <span className="text-slate-400 text-xs font-mono">
-                    D-Pad
-                  </span>
-                  <div className="flex gap-1">
-                    {(["UP", "DOWN", "LEFT", "RIGHT"] as const).map((btn) => (
-                      <kbd
-                        key={btn}
-                        className="px-1.5 py-0.5 bg-slate-700 rounded text-cyan-400 text-xs font-mono"
-                      >
-                        {getKeyDisplayName(keyMappings[btn])}
-                      </kbd>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex items-center justify-between p-2 bg-slate-800/50 rounded-lg">
-                  <span className="text-slate-400 text-xs font-mono">
-                    A / B
-                  </span>
-                  <div className="flex gap-1">
-                    <kbd className="px-1.5 py-0.5 bg-fuchsia-600/50 rounded text-white text-xs font-mono">
-                      {getKeyDisplayName(keyMappings.A)}
-                    </kbd>
-                    <kbd className="px-1.5 py-0.5 bg-rose-600/50 rounded text-white text-xs font-mono">
-                      {getKeyDisplayName(keyMappings.B)}
-                    </kbd>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between p-2 bg-slate-800/50 rounded-lg">
-                  <span className="text-slate-400 text-xs font-mono">
-                    L / R
-                  </span>
-                  <div className="flex gap-1">
-                    <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-slate-300 text-xs font-mono">
-                      {getKeyDisplayName(keyMappings.L)}
-                    </kbd>
-                    <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-slate-300 text-xs font-mono">
-                      {getKeyDisplayName(keyMappings.R)}
-                    </kbd>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between p-2 bg-slate-800/50 rounded-lg">
-                  <span className="text-slate-400 text-xs font-mono">
-                    Start / Select
-                  </span>
-                  <div className="flex gap-1">
-                    <kbd className="px-1.5 py-0.5 bg-emerald-600/50 rounded text-white text-xs font-mono">
-                      {getKeyDisplayName(keyMappings.START)}
-                    </kbd>
-                    <kbd className="px-1.5 py-0.5 bg-slate-600/50 rounded text-white text-xs font-mono">
-                      {getKeyDisplayName(keyMappings.SELECT)}
-                    </kbd>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Stream Mode Selector */}
-            <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl backdrop-blur-sm p-4">
-              <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                <svg
-                  className="w-4 h-4 text-green-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"
-                  />
-                </svg>
-                STREAM MODE
-              </h3>
-
-              <div className="space-y-2">
-                <button
-                  onClick={() => handleStreamModeChange("websocket")}
-                  disabled={isPlaying}
-                  className={`w-full p-2 rounded-lg text-xs font-mono transition-all ${
-                    streamMode === "websocket"
-                      ? "bg-cyan-600/50 text-cyan-300 border border-cyan-500/50"
-                      : "bg-slate-800/50 text-slate-400 border border-slate-700/50 hover:bg-slate-700/50"
-                  } ${isPlaying ? "opacity-50 cursor-not-allowed" : ""}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span>WebSocket</span>
-                    {streamMode === "websocket" && (
-                      <span className="w-2 h-2 bg-cyan-400 rounded-full" />
-                    )}
-                  </div>
-                  <p className="text-[10px] text-slate-500 mt-1 text-left">
-                    Standard latency, reliable
-                  </p>
-                </button>
-
-                <button
-                  onClick={() => handleStreamModeChange("webrtc")}
-                  disabled={isPlaying}
-                  className={`w-full p-2 rounded-lg text-xs font-mono transition-all ${
-                    streamMode === "webrtc"
-                      ? "bg-green-600/50 text-green-300 border border-green-500/50"
-                      : "bg-slate-800/50 text-slate-400 border border-slate-700/50 hover:bg-slate-700/50"
-                  } ${isPlaying ? "opacity-50 cursor-not-allowed" : ""}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span>WebRTC</span>
-                    {streamMode === "webrtc" && (
-                      <span className="w-2 h-2 bg-green-400 rounded-full" />
-                    )}
-                  </div>
-                  <p className="text-[10px] text-slate-500 mt-1 text-left">
-                    Low latency, experimental
-                  </p>
-                </button>
-              </div>
-            </div>
-
-            {/* Save States */}
-            <div className="bg-slate-900/50 border border-slate-700/50 rounded-2xl backdrop-blur-sm p-4">
-              <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                <svg
-                  className="w-4 h-4 text-amber-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
-                  />
-                </svg>
-                SAVE STATES
-              </h3>
-
-              <div className="space-y-2">
-                <button
-                  onClick={() => setShowSaveStatesModal(true)}
-                  disabled={!rom}
-                  className={`group w-full p-2 rounded-lg text-xs font-mono transition-all duration-300 ${
-                    rom
-                      ? "bg-amber-600/50 text-amber-300 border border-amber-500/50 hover:bg-amber-600/80 hover:border-amber-400 hover:shadow-[0_0_20px_rgba(251,146,60,0.4)]"
-                      : "bg-slate-800/50 text-white border border-slate-700/50 cursor-not-allowed"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
-                        />
-                      </svg>
-                      <span>Save / Load</span>
-                    </div>
-                    <svg
-                      className="w-4 h-4 text-white transition-transform duration-300 group-hover:translate-x-1"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 5l7 7-7 7"
-                      />
-                    </svg>
-                  </div>
-                  <p className="text-[10px] text-white mt-1 text-left">
-                    Load or save anytime for this ROM.
-                  </p>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer - Hidden on Mobile */}
-        {!isMobile && (
-          <div className="mt-6 md:mt-8 text-center">
-            <div className="inline-flex items-center gap-3 md:gap-4 px-3 md:px-4 py-2 bg-slate-900/50 backdrop-blur-sm border border-slate-700/50 rounded-full text-[10px] md:text-xs font-mono">
-              <span className="text-slate-500">Status:</span>
-              <span
-                className={`font-bold ${
-                  isPlaying ? "text-green-400" : "text-slate-400"
+            {/* Main Content */}
+            <div
+              className={`${
+                isMobile
+                  ? "flex flex-col gap-2 w-full"
+                  : "grid lg:grid-cols-4 gap-4 md:gap-6"
+              }`}
+            >
+              {/* Game Screen */}
+              <div
+                className={`lg:col-span-3 ${
+                  isMobile ? "flex flex-col w-full z-10" : "space-y-4"
                 }`}
               >
-                {isPlaying ? "● PLAYING" : "○ IDLE"}
-              </span>
+                <div
+                  className={`relative bg-slate-900/50 border border-slate-700/50 backdrop-blur-sm overflow-hidden ${
+                    isMobile ? "shrink-0 rounded-lg p-1.5 pb-2" : "rounded-2xl"
+                  }`}
+                >
+                  <GameCanvas
+                    ref={canvasRef}
+                    isPlaying={isPlaying}
+                    isMobile={isMobile}
+                    onStartGame={startEmulation}
+                  />
+
+                  {/* Control Bar */}
+                  <div
+                    className={
+                      isMobile ? "px-1.5" : "px-3 md:px-6 pb-3 md:pb-6"
+                    }
+                  >
+                    <GameControlBar
+                      status={status}
+                      isPlaying={isPlaying}
+                      sessionId={sessionId}
+                      streamMode={streamMode}
+                      isMobile={isMobile}
+                      rom={rom}
+                      onStart={startEmulation}
+                      onStop={stopEmulation}
+                      onToggleFullscreen={toggleFullscreen}
+                      onStreamModeChange={handleStreamModeChange}
+                      onOpenSaveStates={() => setShowSaveStatesModal(true)}
+                    />
+                  </div>
+                </div>
+
+                {/* Mobile Virtual Controller */}
+                {isMobile && sessionId && (
+                  <MobileVirtualController onInput={sendInput} />
+                )}
+              </div>
+
+              {/* Side Panel - Desktop Only */}
+              <DesktopSidePanel
+                keyMappings={keyMappings}
+                streamMode={streamMode}
+                isPlaying={isPlaying}
+                hasRom={!!rom}
+                onOpenControlsConfig={() => setShowControlsConfig(true)}
+                onStreamModeChange={handleStreamModeChange}
+                onOpenSaveStates={() => setShowSaveStatesModal(true)}
+              />
             </div>
+
+            {/* Footer - Desktop Only */}
+            {!isMobile && <GameFooter isPlaying={isPlaying} />}
           </div>
-        )}
-      </div>
 
-      {/* Controls Configuration Dialog */}
-      <ControlsConfigDialog
-        open={showControlsConfig}
-        onOpenChange={setShowControlsConfig}
-        onMappingsChange={handleKeyMappingsChange}
-      />
+          {/* Controls Configuration Dialog */}
+          <ControlsConfigDialog
+            open={showControlsConfig}
+            onOpenChange={setShowControlsConfig}
+            onMappingsChange={handleKeyMappingsChange}
+          />
 
-      {/* Save States Modal */}
-      {rom && (
-        <SaveStatesModal
-          isOpen={showSaveStatesModal}
-          onClose={() => setShowSaveStatesModal(false)}
-          romId={romId}
-          romName={name || gameData?.name || "Game"}
-          onSave={handleSaveState}
-          onLoad={handleLoadState}
-        />
+          {/* Save States Modal */}
+          {rom && (
+            <SaveStatesModal
+              isOpen={showSaveStatesModal}
+              onClose={() => setShowSaveStatesModal(false)}
+              romId={romId}
+              romName={name || gameData?.name || "Game"}
+              onSave={handleSaveState}
+              onLoad={handleLoadState}
+            />
+          )}
+        </>
       )}
     </div>
   );
