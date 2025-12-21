@@ -7,10 +7,9 @@ import {
   AnimatedBackground,
   UserTopBar,
   RomsPageHeader,
-  UploadRomDialog,
+  UploadGameCard,
   LoadingState,
   ErrorState as ErrorStateComponent,
-  EmptyState,
   GamesFooter,
   GamesGrid,
 } from "@/components/roms";
@@ -87,23 +86,6 @@ export default function RomsPage() {
 
         <RomsPageHeader />
 
-        <div className="text-center">
-          <UploadRomDialog
-            uploading={upload.uploading}
-            selectedRomFile={upload.selectedRomFile}
-            dialogOpen={upload.dialogOpen}
-            romInputRef={upload.romInputRef}
-            imageInputRef={upload.imageInputRef}
-            onDialogOpenChange={upload.setDialogOpen}
-            onUploadRomClick={upload.handleUploadRomClick}
-            onUploadImageClick={upload.handleUploadImageClick}
-            onRomFileChange={upload.handleRomFileChange}
-            onImageFileChange={upload.handleImageFileChange}
-            onUploadWithoutImage={upload.handleUploadWithoutImage}
-            onDialogClose={upload.handleDialogClose}
-          />
-        </div>
-
         {/* Loading State */}
         {loading && <LoadingState />}
 
@@ -117,12 +99,24 @@ export default function RomsPage() {
         )}
 
         {/* Games Grid */}
-        {!loading && !error && games.length > 0 && (
-          <GamesGrid games={games} onGameClick={handleGameClick} />
+        {!loading && !error && (
+          <GamesGrid games={games} onGameClick={handleGameClick}>
+            <UploadGameCard
+              uploading={upload.uploading}
+              selectedRomFile={upload.selectedRomFile}
+              dialogOpen={upload.dialogOpen}
+              romInputRef={upload.romInputRef}
+              imageInputRef={upload.imageInputRef}
+              onDialogOpenChange={upload.setDialogOpen}
+              onUploadRomClick={upload.handleUploadRomClick}
+              onUploadImageClick={upload.handleUploadImageClick}
+              onRomFileChange={upload.handleRomFileChange}
+              onImageFileChange={upload.handleImageFileChange}
+              onUploadWithoutImage={upload.handleUploadWithoutImage}
+              onDialogClose={upload.handleDialogClose}
+            />
+          </GamesGrid>
         )}
-
-        {/* Empty State */}
-        {!loading && !error && games.length === 0 && <EmptyState />}
 
         <GamesFooter totalGames={games.length} />
       </div>

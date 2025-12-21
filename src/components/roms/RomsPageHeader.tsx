@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 
 export function RomsPageHeader() {
   return (
-    <div className="mb-12 text-center">
+    <div className="mb-12 mt-2 md:mt-0 text-center">
       <div className="inline-block mb-4">
         <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/50 px-4 py-1 text-sm font-mono uppercase tracking-wider">
           🎮 Game Library

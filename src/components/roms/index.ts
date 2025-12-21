@@ -4,6 +4,7 @@ export { AnimatedBackground } from "./AnimatedBackground";
 export { UserTopBar } from "./UserTopBar";
 export { RomsPageHeader } from "./RomsPageHeader";
 export { UploadRomDialog } from "./UploadRomDialog";
+export { UploadGameCard } from "./UploadGameCard";
 export { LoadingState } from "./LoadingState";
 export { ErrorState } from "./ErrorState";
 export { EmptyState } from "./EmptyState";

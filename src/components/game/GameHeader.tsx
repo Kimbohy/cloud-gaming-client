@@ -57,7 +57,7 @@ export function GameHeader({
         className="group inline-flex items-center gap-2 text-slate-400 hover:text-white transition-colors mb-4 md:mb-6"
       >
         <svg
-          className="w-5 h-5 transform group-hover:-translate-x-1.5 transition-transform"
+          className="w-5 h-5 transform group-hover:-translate-x-1 transition-transform"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"

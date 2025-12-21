@@ -5,6 +5,7 @@ import { type Rom } from "@/api/roms.api";
 interface GamesGridProps {
   games: Rom[];
   onGameClick: (game: Rom) => void;
+  children?: React.ReactNode;
 }
 
 interface GameCardItemProps {
@@ -78,7 +79,7 @@ function GameCardItem({ game, onClick }: GameCardItemProps) {
   );
 }
 
-export function GamesGrid({ games, onGameClick }: GamesGridProps) {
+export function GamesGrid({ games, onGameClick, children }: GamesGridProps) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 mt-4">
       {games.map((game, index) => (
@@ -88,6 +89,7 @@ export function GamesGrid({ games, onGameClick }: GamesGridProps) {
           onClick={() => onGameClick(game)}
         />
       ))}
+      {children}
     </div>
   );
 }
